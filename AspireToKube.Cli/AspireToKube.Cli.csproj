@@ -2,19 +2,25 @@
 
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
-		<TargetFramework>net10.0</TargetFramework>
+		<TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
 
 		<!-- Tool-specific settings -->
 		<PackAsTool>true</PackAsTool>
 		<ToolCommandName>aspire2kube</ToolCommandName>
+		<PackageOutputPath>./nupkg</PackageOutputPath>
 		
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<PackageId>Aspire2Kube.Cli</PackageId>
-		<Version>0.1.0</Version>
+		<Version>0.1.8</Version>
 		<Authors>Amin Parsa</Authors>
 		<Description>Friendly CLI to package Aspire projects and deploy to Kubernetes.</Description>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<RepositoryUrl>https://github.com/aminparsa18/AspireToKube.git</RepositoryUrl>
+		<RepositoryType>Git</RepositoryType>
+		<PackageTags>aspire;kubernetes;aspirate;kustomize;manifests</PackageTags>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -25,7 +31,8 @@
 		<!-- Ship your scripts with the tool -->
 		<Content Include="scripts\**\*">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-			<PackagePath>tools\scripts\%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
+			<Pack>true</Pack>
+			<PackagePath>tools\$(TargetFramework)\any\scripts\%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
 		</Content>
 	</ItemGroup>
 

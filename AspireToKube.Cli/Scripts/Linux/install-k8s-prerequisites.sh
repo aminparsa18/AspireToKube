@@ -212,7 +212,12 @@ else
                 
                 # Start minikube
                 echo -e "${CYAN}Starting minikube cluster with $MINIKUBE_DRIVER driver...${NC}"
-                minikube start --driver=$MINIKUBE_DRIVER
+                # minikube + podman doesn't like running as root unless you use --force
+                if [ "$(id -u)" -eq 0 ] && [ "$MINIKUBE_DRIVER" = "podman" ]; then
+                    minikube start --driver="$MINIKUBE_DRIVER" --force
+                else
+                    minikube start --driver="$MINIKUBE_DRIVER"
+                fi
                 
                 # Configure kubectl
                 echo -e "${CYAN}Configuring kubectl for minikube...${NC}"

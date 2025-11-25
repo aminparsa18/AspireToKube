@@ -3,6 +3,7 @@ using System.CommandLine;
 
 var root = new RootCommand("Aspire to Kubernetes helper tool (front-end for aspire2kube.ps1)");
 
+root.Subcommands.Add(DeployCommand.Create());
 root.Subcommands.Add(GenerateCommand.Create());
 root.Subcommands.Add(HelpCommand.Create());
 root.Subcommands.Add(InitCommand.Create());

@@ -4,14 +4,32 @@ using System.Runtime.InteropServices;
 
 namespace AspireToKube.Cli.Commands;
 
-internal static class InitCommand
+static internal class DeployCommand
 {
     public static Command Create()
     {
-        var cmd = new Command("init", "Initialize aspire2kube environment");
+        var cmd = new Command("deploy", "Deploy manifests to a local Kubernetes cluster");
 
-        cmd.SetAction(_ =>
+        // --target k3s|minikube (required)
+        var targetOption = new Option<string>("--target")
         {
+            Description = "Cluster type to deploy to: k3s or minikube",
+            Required = true
+        };
+
+        cmd.Options.Add(targetOption);
+
+        cmd.SetAction(parseResult =>
+        {
+            var targetRaw = parseResult.GetValue(targetOption) ?? string.Empty;
+            var target = targetRaw.Trim().ToLowerInvariant();
+
+            if (target is not ("k3s" or "minikube"))
+            {
+                Console.Error.WriteLine("Invalid --target value. Allowed values: k3s, minikube.");
+                return 1;
+            }
+
             var baseDir = AppContext.BaseDirectory;
 
             string scriptRunner;
@@ -25,29 +43,43 @@ internal static class InitCommand
                     ? "/bin/bash"
                     : File.Exists("/usr/bin/bash")
                         ? "/usr/bin/bash"
-                        : "bash"; // last fallback
+                        : "bash";
 
-                scriptPath = Path.Combine(baseDir, "scripts", "Linux", "install-k8s-prerequisites.sh");
+                var scriptFile = target == "k3s"
+                    ? "deploy2k3s.sh"
+                    : "deploy2minikube.sh";
+
+                // NOTE: "Linux" must match your folder name/casing in the nupkg
+                scriptPath = Path.Combine(baseDir, "scripts", "Linux", scriptFile);
                 scriptRunner = bashPath;
                 scriptArgs = $"\"{scriptPath}\"";
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                scriptPath = Path.Combine(baseDir, "scripts", "Windows", "install-k8s-prerequisites.ps1");
+                var scriptFile = target == "k3s"
+                    ? "deploy2k3s.ps1"
+                    : "deploy2minikube.ps1";
+
+                // NOTE: "Windows" must match your folder name/casing in the nupkg
+                scriptPath = Path.Combine(baseDir, "scripts", "Windows", scriptFile);
                 scriptRunner = "powershell";
                 scriptArgs = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\"";
             }
             else
             {
-                Console.Error.WriteLine("The 'init' command is only supported on Windows and Linux right now.");
+                Console.Error.WriteLine("The 'deploy' command is only supported on Windows and Linux right now.");
                 return 1;
             }
 
             if (!File.Exists(scriptPath))
             {
-                Console.Error.WriteLine($"Init script not found at: {scriptPath}");
+                Console.Error.WriteLine($"Deploy script not found at: {scriptPath}");
                 return 1;
             }
+
+            Console.WriteLine($"[deploy] Target : {target}");
+            Console.WriteLine($"[deploy] Script : {scriptPath}");
+            Console.WriteLine();
 
             var exitCode = RunProcess(scriptRunner, scriptArgs);
             return exitCode;
@@ -65,6 +97,9 @@ internal static class InitCommand
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
+
+            // Use the directory where the user ran "aspire2kube ..."
+            WorkingDirectory = Environment.CurrentDirectory
         };
 
         using var proc = new Process { StartInfo = psi };
