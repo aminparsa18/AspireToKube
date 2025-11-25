@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+
+		<!-- Tool-specific settings -->
+		<PackAsTool>true</PackAsTool>
+		<ToolCommandName>aspire2kube</ToolCommandName>
+		
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<PackageId>Aspire2Kube.Cli</PackageId>
+		<Version>0.1.0</Version>
+		<Authors>Amin Parsa</Authors>
+		<Description>Friendly CLI to package Aspire projects and deploy to Kubernetes.</Description>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+	</PropertyGroup>
+
+	<ItemGroup>
+	  <PackageReference Include="System.CommandLine" Version="2.0.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Ship your scripts with the tool -->
+		<Content Include="scripts\**\*">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<PackagePath>tools\scripts\%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
+		</Content>
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="..\README.md" Pack="true" PackagePath="\"/>
+	</ItemGroup>
+</Project>
