@@ -118,6 +118,11 @@ prepare_kustomization_secrets() {
         return 0
     fi
 
+    echo
+    echo -e "${CYAN}  >>> INPUT REQUIRED for '${svc_name}' secrets <<<${NC}"
+    echo -e "${YELLOW}  For each one, enter a value and press ENTER (or just press ENTER to skip).${NC}"
+    echo
+
     for ph in "${placeholders[@]}"; do
         local found=0
         for full in "${env_files_full[@]}"; do
@@ -134,10 +139,11 @@ prepare_kustomization_secrets() {
         echo
         echo -e "${YELLOW}  Missing secret value for '${ph}' in '${svc_name}'.${NC}"
         echo -e "${YELLOW}  It is referenced in ${kfile}.${NC}"
-        read -s -p "  Enter value for ${ph}: " val
+        # Show explicit “press ENTER to skip”
+        read -s -p "  Enter value for ${ph} (or press ENTER to skip): " val
         echo
         if [ -z "$val" ]; then
-            echo -e "${RED}  No value entered; skipping ${ph}. You can edit secrets file manually later.${NC}"
+            echo -e "${RED}  No value entered; skipping ${ph}. You can edit the secrets file manually later.${NC}"
             continue
         fi
 
@@ -189,7 +195,20 @@ for dir in "$MANIFESTS_DIR"/*; do
 
     if [ -f "$dir/kustomization.yaml" ] || [ -f "$dir/kustomization.yml" ]; then
         echo -e "${YELLOW}Deploying ${svc}...${NC}"
+
+        # 1) Prepare secrets for this top-level kustomization dir
         prepare_kustomization_secrets "$dir"
+
+        # 2) Also prepare secrets for any nested kustomizations referenced under this dir
+        #    e.g. manifests/aspirate-output/sql/kustomization.yaml
+        while IFS= read -r -d '' kfile; do
+            nested_dir="$(dirname "$kfile")"
+            # Avoid re-processing the root dir itself
+            if [ "$nested_dir" != "$dir" ]; then
+                prepare_kustomization_secrets "$nested_dir"
+            fi
+        done < <(find "$dir" -mindepth 2 -type f \( -name 'kustomization.yaml' -o -name 'kustomization.yml' \) -print0)
+
         kc apply -k "$dir"
         echo -e "${GREEN}${svc} deployed${NC}"
         echo ""

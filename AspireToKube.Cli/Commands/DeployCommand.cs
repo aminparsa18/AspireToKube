@@ -47,7 +47,7 @@ static internal class DeployCommand
 
                 var scriptFile = target == "k3s"
                     ? "deploy2k3s.sh"
-                    : "deploy2minikube.sh";
+                    : "deploy2minikube2.sh";
 
                 // NOTE: "Linux" must match your folder name/casing in the nupkg
                 scriptPath = Path.Combine(baseDir, "scripts", "Linux", scriptFile);

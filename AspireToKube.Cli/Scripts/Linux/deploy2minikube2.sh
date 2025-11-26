@@ -1,15 +1,10 @@
-#!/bin/bash
+﻿#!/bin/bash
 
-# Generic Aspire / minikube deployment script
+# Generic Aspire / Minikube deployment script
 # Run from directory that contains:
 #   - manifests/
 #   - *.tar (custom images)
-#   - optional kustomization.yaml inside manifests/ (applied last)
-#
-# Prerequisites:
-#   - minikube is already started
-#   - kubectl is configured to talk to the minikube cluster
-#     (e.g. `kubectl config use-context minikube` OR use `minikube kubectl --`)
+#   - optional top-level kustomization.yaml (applied last)
 
 set -euo pipefail
 
@@ -20,44 +15,75 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 echo "================================================"
-echo "  ECS Application Deployment (minikube)"
+echo "  ECS Application Deployment (Minikube)"
 echo "================================================"
 echo ""
+
+# ================================================
+# STEP 0: Check if running as root/sudo
+# ================================================
+
+if [ "$EUID" -ne 0 ]; then 
+    echo -e "${RED}Error: This script must be run with sudo${NC}"
+    echo ""
+    echo "Please run:"
+    echo -e "  ${CYAN}sudo bash $0${NC}"
+    echo ""
+    exit 1
+fi
 
 BASE_DIR="$(pwd)"
 MANIFESTS_DIR="${BASE_DIR}/manifests"
 
 if [ ! -d "$MANIFESTS_DIR" ]; then
     echo -e "${RED}manifests/ folder not found in current directory.${NC}"
-    echo "Run this script from the Aspire-Migration folder."
+    echo "Run this script from the directory containing your manifests folder."
     exit 1
 fi
 
-# -------------------------------------------------------
-# Check minikube status
-# -------------------------------------------------------
+# ================================================
+# STEP 1: Check Minikube installation
+# ================================================
+
 if ! command -v minikube &>/dev/null; then
-    echo -e "${RED}minikube not found in PATH. Install minikube first.${NC}"
+    echo -e "${RED}minikube not found in PATH.${NC}"
+    echo ""
+    echo "To install Minikube, run:"
+    echo -e "  ${CYAN}curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64${NC}"
+    echo -e "  ${CYAN}sudo install minikube-linux-amd64 /usr/local/bin/minikube${NC}"
+    echo ""
     exit 1
 fi
 
-echo -e "${CYAN}Checking minikube status...${NC}"
-if ! minikube status >/dev/null 2>&1; then
-    echo -e "${RED}minikube is not running or not configured correctly.${NC}"
-    echo "Start it with: minikube start"
+if ! command -v kubectl &>/dev/null; then
+    echo -e "${RED}kubectl not found in PATH.${NC}"
+    echo ""
+    echo "To install kubectl, run:"
+    echo -e "  ${CYAN}sudo apt-get update && sudo apt-get install -y kubectl${NC}"
+    echo ""
     exit 1
 fi
 
-# -------------------------------------------------------
-# kubectl wrapper: prefer kubectl, fallback to minikube kubectl
-# -------------------------------------------------------
-kc() {
-    if command -v kubectl &>/dev/null; then
-        kubectl "$@"
-    else
-        minikube kubectl -- "$@"
-    fi
-}
+echo -e "${GREEN}✓ Minikube and kubectl found${NC}"
+echo ""
+
+# ================================================
+# STEP 2: Check Minikube status
+# ================================================
+
+echo -e "${YELLOW}Checking Minikube status...${NC}"
+
+if ! minikube status &>/dev/null; then
+    echo -e "${YELLOW}Minikube is not running. Starting Minikube...${NC}"
+    minikube start --driver=docker
+    echo -e "${GREEN}✓ Minikube started${NC}"
+else
+    echo -e "${GREEN}✓ Minikube is already running${NC}"
+fi
+
+# Configure kubectl to use Minikube context
+kubectl config use-context minikube
+echo ""
 
 # -------------------------------------------------------
 # Helper: prepare secrets for a single kustomization dir
@@ -93,7 +119,6 @@ prepare_kustomization_secrets() {
     )
 
     if [ "${#env_files_rel[@]}" -eq 0 ]; then
-        # This service doesn't use secretGenerator envs; nothing to do.
         return 0
     fi
 
@@ -111,7 +136,7 @@ prepare_kustomization_secrets() {
         env_files_full+=("$full")
     done
 
-    # Find {placeholders} in the kustomization (e.g. {cache-password-uri-encoded.value})
+    # Find {placeholders} in the kustomization
     mapfile -t placeholders < <(
         grep -o '{[^}][^}]*}' "$kfile" 2>/dev/null \
         | tr -d '{}' \
@@ -167,9 +192,12 @@ prepare_kustomization_secrets() {
 }
 
 # -------------------------------------------------------
-# 1) Import all .tar images (for your custom services)
+# STEP 3: Import all .tar images into Minikube
 # -------------------------------------------------------
-echo -e "${YELLOW}[1/3] Importing container images from *.tar (if needed)...${NC}"
+echo -e "${YELLOW}[1/3] Importing container images from *.tar into Minikube...${NC}"
+
+# Point Docker to use Minikube's Docker daemon
+eval $(minikube docker-env)
 
 shopt -s nullglob
 tar_files=("$BASE_DIR"/*.tar)
@@ -178,42 +206,10 @@ shopt -u nullglob
 if [ "${#tar_files[@]}" -eq 0 ]; then
     echo -e "${YELLOW}No .tar files found, skipping image import.${NC}"
 else
-    # Try to use docker images list (most common when minikube uses Docker driver)
-    if command -v docker &>/dev/null; then
-        existing_images="$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true)"
-    else
-        existing_images=""
-    fi
-
     for tar in "${tar_files[@]}"; do
         tar_name="$(basename "$tar")"
-        guess="${tar_name%.tar}"
-
-        if [ -n "$existing_images" ] && echo "$existing_images" | grep -q "$guess"; then
-            echo -e "  ${CYAN}${tar_name}${NC} -> image containing '${guess}' already present, skipping import."
-            continue
-        fi
-
-        echo -e "  Importing ${CYAN}${tar_name}${NC}..."
-
-        if command -v docker &>/dev/null; then
-            # Common case: minikube uses the same docker daemon
-            docker load -i "$tar" >/dev/null
-        elif command -v nerdctl &>/devnull; then
-            # In case someone uses containerd with nerdctl
-            nerdctl load -i "$tar" >/dev/null
-        elif command -v ctr &>/dev/null; then
-            # Very generic fallback for containerd-based setups
-            ctr -n k8s.io images import "$tar" >/dev/null
-        else
-            # Last resort, try minikube image load (for non-docker runtimes)
-            if minikube image load "$tar" >/dev/null 2>&1; then
-                :
-            else
-                echo -e "${RED}    Could not find a compatible tool to import $tar.${NC}"
-                echo -e "${YELLOW}    You may need to manually load this image into minikube.${NC}"
-            fi
-        fi
+        echo -e "  Loading ${CYAN}${tar_name}${NC} into Minikube..."
+        docker load -i "$tar"
     done
 fi
 
@@ -221,8 +217,7 @@ echo -e "${GREEN}Image import phase finished.${NC}"
 echo ""
 
 # -------------------------------------------------------
-# 2) Deploy every kustomization under manifests/
-#    (including nested kustomizations' secrets)
+# STEP 5: Deploy every kustomization under manifests/
 # -------------------------------------------------------
 echo -e "${YELLOW}[2/3] Applying manifests for all services...${NC}"
 
@@ -236,7 +231,7 @@ for dir in "$MANIFESTS_DIR"/*; do
         # Prepare secrets for this top-level kustomization dir
         prepare_kustomization_secrets "$dir"
 
-        # Also prepare secrets for any nested kustomizations under this dir
+        # Also prepare secrets for any nested kustomizations
         while IFS= read -r -d '' kfile; do
             nested_dir="$(dirname "$kfile")"
             if [ "$nested_dir" != "$dir" ]; then
@@ -244,26 +239,26 @@ for dir in "$MANIFESTS_DIR"/*; do
             fi
         done < <(find "$dir" -mindepth 2 -type f \( -name 'kustomization.yaml' -o -name 'kustomization.yml' \) -print0)
 
-        kc apply -k "$dir"
+        kubectl apply -k "$dir"
         echo -e "${GREEN}${svc} deployed${NC}"
         echo ""
     fi
 done
 
 # -------------------------------------------------------
-# OPTIONAL: aggregate kustomization under manifests/
-# (dashboard / Aspire view) - applied LAST if it exists
+# OPTIONAL: root/parent kustomization (dashboard, etc.)
+# Applied LAST if it exists
 # -------------------------------------------------------
-if [ -f "$MANIFESTS_DIR/kustomization.yaml" ] || [ -f "$MANIFESTS_DIR/kustomization.yml" ]; then
-    echo -e "${YELLOW}Deploying aggregate kustomization (manifests/)...${NC}"
-    prepare_kustomization_secrets "$MANIFESTS_DIR"
-    kc apply -k "$MANIFESTS_DIR"
-    echo -e "${GREEN}Aggregate kustomization deployed${NC}"
+if [ -f "$BASE_DIR/kustomization.yaml" ] || [ -f "$BASE_DIR/kustomization.yml" ]; then
+    echo -e "${YELLOW}Deploying top-level kustomization (parent folder)...${NC}"
+    prepare_kustomization_secrets "$BASE_DIR"
+    kubectl apply -k "$BASE_DIR"
+    echo -e "${GREEN}Top-level kustomization deployed${NC}"
     echo ""
 fi
 
 # -------------------------------------------------------
-# 3) Status + how to access
+# STEP 6: Status + URLs
 # -------------------------------------------------------
 echo "================================================"
 echo "  Deployment Status"
@@ -271,28 +266,43 @@ echo "================================================"
 echo ""
 
 echo -e "${CYAN}Pods:${NC}"
-kc get pods
+kubectl get pods
 echo ""
 
 echo -e "${CYAN}Services:${NC}"
-kc get services
+kubectl get services
 echo ""
+
+# Get Minikube IP
+MINIKUBE_IP=$(minikube ip)
 
 echo "================================================"
 echo "  Access Information"
 echo "================================================"
 echo ""
 
-echo -e "${YELLOW}Your services are deployed to minikube!${NC}"
+echo -e "${YELLOW}Minikube IP: ${GREEN}${MINIKUBE_IP}${NC}"
 echo ""
-echo -e "${CYAN}To access a service (e.g. 'webfrontend') via minikube:${NC}"
-echo "  minikube service webfrontend --url"
+
+echo -e "${CYAN}Services with NodePort access:${NC}"
+kubectl get services --all-namespaces -o wide | grep NodePort | while read -r line; do
+    namespace=$(echo "$line" | awk '{print $1}')
+    service=$(echo "$line" | awk '{print $2}')
+    port=$(echo "$line" | awk '{print $5}' | grep -oP '\d+:\K\d+' | head -1)
+    if [ ! -z "$port" ]; then
+        echo -e "  ${service} (${namespace}): ${GREEN}http://${MINIKUBE_IP}:${port}${NC}"
+    fi
+done
+
 echo ""
-echo -e "${CYAN}To open the Kubernetes dashboard (if enabled):${NC}"
-echo "  minikube dashboard"
-echo ""
-echo -e "${YELLOW}To use k9s for management (if installed):${NC}"
-echo -e "  ${CYAN}k9s${NC}"
+echo -e "${YELLOW}Useful commands:${NC}"
+echo -e "  View all pods:           ${CYAN}kubectl get pods${NC}"
+echo -e "  View logs:               ${CYAN}kubectl logs <pod-name>${NC}"
+echo -e "  Minikube dashboard:      ${CYAN}minikube dashboard${NC}"
+echo -e "  Access a service:        ${CYAN}minikube service <service-name>${NC}"
+echo -e "  Port forward:            ${CYAN}kubectl port-forward service/<name> 8080:8080${NC}"
+echo -e "  Stop Minikube:           ${CYAN}minikube stop${NC}"
+echo -e "  Delete Minikube cluster: ${CYAN}minikube delete${NC}"
 echo ""
 
 echo -e "${GREEN}Deployment complete!${NC}"

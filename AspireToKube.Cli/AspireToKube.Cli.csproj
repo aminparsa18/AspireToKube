@@ -12,7 +12,7 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<PackageId>Aspire2Kube.Cli</PackageId>
-		<Version>0.1.8</Version>
+		<Version>0.1.16</Version>
 		<Authors>Amin Parsa</Authors>
 		<Description>Friendly CLI to package Aspire projects and deploy to Kubernetes.</Description>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>

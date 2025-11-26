@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Prerequisites Installation Script for Rocky Linux
-# Installs: kubectl, k9s, k3s OR minikube, Kubernetes Dashboard, Lens (optional), Aspirate, mssql-tools
+# Prerequisites Installation Script for Ubuntu
+# Installs: k9s, k3s OR minikube, Kubernetes Dashboard, Lens (optional)
+# Note: kubectl is included with both k3s and minikube
 
 set -e
 
@@ -25,13 +26,14 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Update system
-echo -e "${YELLOW}[1/9] Updating system...${NC}"
-sudo dnf update -y
+echo -e "${YELLOW}[1/6] Updating system...${NC}"
+apt-get update -y
+apt-get upgrade -y
 echo -e "${GREEN}System updated${NC}"
 echo ""
 
 # Choose Kubernetes implementation
-echo -e "${YELLOW}[2/9] Choose Kubernetes implementation:${NC}"
+echo -e "${YELLOW}[2/6] Choose Kubernetes implementation:${NC}"
 echo -e "${CYAN}1) k3s (Lightweight Kubernetes, recommended for production)${NC}"
 echo -e "${CYAN}2) minikube (Development focused, single-node cluster)${NC}"
 echo ""
@@ -51,40 +53,8 @@ else
 fi
 echo ""
 
-# Install kubectl
-echo -e "${YELLOW}[3/9] Installing kubectl...${NC}"
-
-# Refresh PATH
-export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
-
-if command -v kubectl &> /dev/null; then
-    echo -e "${GREEN}kubectl already installed${NC}"
-    kubectl version --client 2>/dev/null || kubectl version --client --short 2>/dev/null || echo "kubectl found"
-else
-    echo -e "${CYAN}Downloading kubectl...${NC}"
-    
-    cd /tmp
-    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-    
-    if [ -f kubectl ]; then
-        chmod +x kubectl
-        mv kubectl /usr/local/bin/kubectl
-        
-        # Verify installation
-        if [ -f /usr/local/bin/kubectl ]; then
-            echo -e "${GREEN}kubectl installed successfully${NC}"
-            /usr/local/bin/kubectl version --client 2>/dev/null || echo "kubectl is ready"
-        else
-            echo -e "${RED}kubectl installation failed${NC}"
-        fi
-    else
-        echo -e "${RED}kubectl download failed${NC}"
-    fi
-fi
-echo ""
-
 # Install k9s
-echo -e "${YELLOW}[4/9] Installing k9s...${NC}"
+echo -e "${YELLOW}[3/7] Installing k9s...${NC}"
 
 if command -v k9s &> /dev/null; then
     echo -e "${GREEN}k9s already installed${NC}"
@@ -123,7 +93,7 @@ fi
 echo ""
 
 # Install either k3s or minikube based on user choice
-echo -e "${YELLOW}[5/9] Installing $K8S_TYPE (Kubernetes cluster)...${NC}"
+echo -e "${YELLOW}[4/7] Installing $K8S_TYPE (Kubernetes cluster)...${NC}"
 
 if [ "$K8S_TYPE" == "k3s" ]; then
     # Install k3s
@@ -178,23 +148,56 @@ else
         echo -e "${CYAN}Installing dependencies for minikube...${NC}"
         
         # Install required packages
-        dnf install -y conntrack socat
+        apt-get install -y conntrack socat
         
         # Check if running in a VM or physical machine
         if systemctl is-active --quiet libvirtd || grep -E '(vmx|svm)' /proc/cpuinfo > /dev/null; then
             echo -e "${CYAN}Installing KVM/libvirt for minikube (VM driver)...${NC}"
-            dnf install -y qemu-kvm libvirt libvirt-daemon-kvm
+            apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst virt-manager
             systemctl start libvirtd
             systemctl enable libvirtd
+            
+            # Add user to libvirt group
+            if [ "$SUDO_USER" ]; then
+                usermod -aG libvirt $SUDO_USER
+            fi
+            
             MINIKUBE_DRIVER="kvm2"
         else
-            echo -e "${YELLOW}No virtualization detected, will use Docker or Podman driver${NC}"
-            # Install Podman as an alternative to Docker
-            echo -e "${CYAN}Installing Podman for minikube...${NC}"
-            dnf install -y podman podman-docker
-            systemctl start podman.socket
-            systemctl enable podman.socket
-            MINIKUBE_DRIVER="podman"
+            echo -e "${YELLOW}No virtualization detected, will use Docker driver${NC}"
+            # Install Docker
+            echo -e "${CYAN}Installing Docker for minikube...${NC}"
+            
+            # Remove old Docker packages if they exist
+            apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+            
+            # Install Docker prerequisites
+            apt-get install -y ca-certificates curl gnupg lsb-release
+            
+            # Add Docker GPG key
+            install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            chmod a+r /etc/apt/keyrings/docker.gpg
+            
+            # Add Docker repository
+            echo \
+              "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+              $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+            
+            # Install Docker
+            apt-get update -y
+            apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            
+            # Start and enable Docker
+            systemctl start docker
+            systemctl enable docker
+            
+            # Add user to docker group
+            if [ "$SUDO_USER" ]; then
+                usermod -aG docker $SUDO_USER
+            fi
+            
+            MINIKUBE_DRIVER="docker"
         fi
         
         echo -e "${CYAN}Downloading minikube...${NC}"
@@ -212,8 +215,8 @@ else
                 
                 # Start minikube
                 echo -e "${CYAN}Starting minikube cluster with $MINIKUBE_DRIVER driver...${NC}"
-                # minikube + podman doesn't like running as root unless you use --force
-                if [ "$(id -u)" -eq 0 ] && [ "$MINIKUBE_DRIVER" = "podman" ]; then
+                # minikube doesn't like running as root with docker unless you use --force
+                if [ "$(id -u)" -eq 0 ] && [ "$MINIKUBE_DRIVER" = "docker" ]; then
                     minikube start --driver="$MINIKUBE_DRIVER" --force
                 else
                     minikube start --driver="$MINIKUBE_DRIVER"
@@ -246,30 +249,16 @@ fi
 echo ""
 
 # Install Kubernetes Dashboard
-echo -e "${YELLOW}[6/9] Installing Kubernetes Dashboard...${NC}"
+echo -e "${YELLOW}[5/7] Installing Kubernetes Dashboard...${NC}"
 
-# Only makes sense on a machine with a graphical desktop
-GUI_AVAILABLE=false
-
-if command -v systemctl &> /dev/null; then
-    # If default target is graphical, assume we have a GUI
-    if systemctl get-default 2>/dev/null | grep -q "graphical.target"; then
-        GUI_AVAILABLE=true
-    fi
+# Set KUBECONFIG based on the chosen implementation
+if [ "$K8S_TYPE" == "k3s" ]; then
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 fi
 
-if [ "$GUI_AVAILABLE" != "true" ]; then
-    echo -e "${GRAY}No graphical desktop detected (default target is not 'graphical').${NC}"
-    echo -e "${GRAY}Skipping Kubernetes Dashboard installation.${NC}"
+if kubectl get namespace kubernetes-dashboard &> /dev/null; then
+    echo -e "${GREEN}Kubernetes Dashboard already installed${NC}"
 else
-    # Set KUBECONFIG based on the chosen implementation
-    if [ "$K8S_TYPE" == "k3s" ]; then
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-    fi
-
-    if kubectl get namespace kubernetes-dashboard &> /dev/null; then
-        echo -e "${GREEN}Kubernetes Dashboard already installed${NC}"
-    else
         echo -e "${CYAN}Deploying Kubernetes Dashboard...${NC}"
         
         # Apply the official dashboard manifest
@@ -344,27 +333,33 @@ EOF
         echo ""
         echo -e "${CYAN}Dashboard access: $DASHBOARD_URL${NC}"
         echo -e "${CYAN}Use the token from: k8s-dashboard-token.txt${NC}"
-    fi
 fi
 echo ""
 
 # Lens installation (optional)
-echo -e "${YELLOW}[7/9] Lens installation (Kubernetes IDE)...${NC}"
+echo -e "${YELLOW}[6/7] Lens installation (Kubernetes IDE)...${NC}"
 
 # Only makes sense on machines with a graphical desktop
 LENS_GUI_AVAILABLE=false
 
+# Check for graphical environment
 if command -v systemctl &> /dev/null; then
     if systemctl get-default 2>/dev/null | grep -q "graphical.target"; then
         LENS_GUI_AVAILABLE=true
     fi
 fi
 
+# Additional check for DISPLAY variable (X11/Wayland)
+if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+    LENS_GUI_AVAILABLE=true
+fi
+
 if [ "$LENS_GUI_AVAILABLE" != "true" ]; then
-    echo -e "${GRAY}No graphical desktop detected (default target is not 'graphical').${NC}"
-    echo -e "${GRAY}Skipping Lens installation.${NC}"
+    echo -e "${GRAY}No graphical desktop detected.${NC}"
+    echo -e "${GRAY}Skipping Lens installation (Lens requires a GUI desktop environment).${NC}"
 else
-    read -p "Do you want to install Lens? (y/n): " INSTALL_LENS
+    # Add timeout in case script is run non-interactively
+    read -t 30 -p "Do you want to install Lens? (y/n): " INSTALL_LENS || INSTALL_LENS="n"
 
     if [[ "$INSTALL_LENS" =~ ^[Yy]$ ]]; then
         if [ -f "/usr/local/bin/lens" ]; then
@@ -411,97 +406,25 @@ EOF
 fi
 echo ""
 
-# Install mssql-tools (SQL Server command line tools)
-echo -e "${YELLOW}[8/9] Installing mssql-tools (SQL Server command line tools)...${NC}"
-
-if command -v sqlcmd &> /dev/null || [ -f /opt/mssql-tools/bin/sqlcmd ]; then
-    echo -e "${GREEN}mssql-tools already installed${NC}"
-    sqlcmd -? 2>&1 | head -n 1 || echo "sqlcmd found"
-else
-    echo -e "${CYAN}Importing Microsoft GPG key...${NC}"
-    rpm --import https://packages.microsoft.com/keys/microsoft.asc || {
-        echo -e "${RED}Failed to import Microsoft GPG key${NC}"
-    }
-
-    echo -e "${CYAN}Detecting Rocky Linux major version...${NC}"
-    OS_MAJOR=$(grep -oP '(?<=^VERSION_ID=\")([0-9]+)' /etc/os-release 2>/dev/null || echo 9)
-
-    if [ "$OS_MAJOR" -lt 9 ]; then
-        RHEL_VER=8
+# Configure firewall (UFW on Ubuntu)
+echo -e "${YELLOW}[7/7] Configuring firewall...${NC}"
+if command -v ufw &> /dev/null; then
+    # Check if UFW is active
+    if ufw status | grep -q "Status: active"; then
+        ufw allow 30000:32767/tcp 2>/dev/null || true
+        ufw allow 6443/tcp 2>/dev/null || true
+        ufw allow 80/tcp 2>/dev/null || true
+        ufw allow 443/tcp 2>/dev/null || true
+        ufw allow 8080/tcp 2>/dev/null || true
+        ufw allow 30443/tcp 2>/dev/null || true  # Dashboard
+        ufw allow 8443/tcp 2>/dev/null || true   # Dashboard port-forward
+        ufw reload 2>/dev/null || true
+        echo -e "${GREEN}Firewall configured${NC}"
     else
-        RHEL_VER=9
+        echo -e "${YELLOW}UFW is not active, skipping firewall configuration${NC}"
     fi
-
-    echo -e "${CYAN}Using Microsoft repo for RHEL ${RHEL_VER} (Rocky ${OS_MAJOR})...${NC}"
-
-    tee /etc/yum.repos.d/msprod.repo > /dev/null << EOF
-[packages-microsoft-com-mssql-server]
-name=Microsoft SQL Server
-baseurl=https://packages.microsoft.com/rhel/${RHEL_VER}/mssql-server-2025
-enabled=1
-gpgcheck=1
-gpgkey=https://packages.microsoft.com/keys/microsoft.asc
-
-[packages-microsoft-com-mssql-tools]
-name=Microsoft SQL Server Tools
-baseurl=https://packages.microsoft.com/rhel/${RHEL_VER}/prod
-enabled=1
-gpgcheck=1
-gpgkey=https://packages.microsoft.com/keys/microsoft.asc
-EOF
-
-    echo -e "${CYAN}Updating repository cache...${NC}"
-    dnf update -y
-
-    echo -e "${CYAN}Installing mssql-tools and unixODBC...${NC}"
-    ACCEPT_EULA=Y dnf install -y mssql-tools unixODBC-devel || {
-        echo -e "${RED}mssql-tools installation failed${NC}"
-    }
-
-    # Add mssql-tools to PATH for root
-    MSSQL_TOOLS_PATH="/opt/mssql-tools/bin"
-    if [[ -d "$MSSQL_TOOLS_PATH" ]]; then
-        if [[ ":$PATH:" != *":$MSSQL_TOOLS_PATH:"* ]]; then
-            echo "export PATH=\"\$PATH:$MSSQL_TOOLS_PATH\"" >> /root/.bashrc
-            export PATH="$PATH:$MSSQL_TOOLS_PATH"
-        fi
-
-        # Add for current user if not root
-        if [ "$SUDO_USER" ]; then
-            SUDO_HOME=$(eval echo ~$SUDO_USER)
-            if ! grep -q "mssql-tools" "$SUDO_HOME/.bashrc" 2>/dev/null; then
-                echo "export PATH=\"\$PATH:$MSSQL_TOOLS_PATH\"" >> "$SUDO_HOME/.bashrc"
-            fi
-        fi
-    fi
-
-    # Verify installation
-    if command -v sqlcmd &> /dev/null || [ -f /opt/mssql-tools/bin/sqlcmd ]; then
-        echo -e "${GREEN}mssql-tools installed successfully${NC}"
-        echo -e "${GRAY}Tools installed: sqlcmd, bcp${NC}"
-        echo -e "${GRAY}Location: /opt/mssql-tools/bin/${NC}"
-        echo -e "${GRAY}Restart terminal or run: source ~/.bashrc${NC}"
-    else
-        echo -e "${RED}mssql-tools installation failed${NC}"
-    fi
-fi
-echo ""
-
-
-# Configure firewall
-echo -e "${YELLOW}Configuring firewall...${NC}"
-if command -v firewall-cmd &> /dev/null; then
-    firewall-cmd --permanent --add-port=30000-32767/tcp 2>/dev/null || true
-    firewall-cmd --permanent --add-port=6443/tcp 2>/dev/null || true
-    firewall-cmd --permanent --add-port=80/tcp 2>/dev/null || true
-    firewall-cmd --permanent --add-port=443/tcp 2>/dev/null || true
-    firewall-cmd --permanent --add-port=8080/tcp 2>/dev/null || true
-    firewall-cmd --permanent --add-port=30443/tcp 2>/dev/null || true  # Dashboard
-    firewall-cmd --permanent --add-port=8443/tcp 2>/dev/null || true   # Dashboard port-forward
-    firewall-cmd --reload 2>/dev/null || true
-    echo -e "${GREEN}Firewall configured${NC}"
 else
-    echo -e "${YELLOW}Firewall not found, skipping${NC}"
+    echo -e "${YELLOW}UFW not found, skipping firewall configuration${NC}"
 fi
 echo ""
 
@@ -515,7 +438,7 @@ echo -e "${YELLOW}Checking installed components:${NC}"
 echo ""
 
 # Refresh PATH before checking
-export PATH="/usr/local/bin:/usr/bin:/bin:/root/.dotnet/tools:/opt/mssql-tools/bin:$PATH"
+export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
 if [ "$K8S_TYPE" == "k3s" ]; then
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 fi
@@ -532,12 +455,6 @@ fi
 DASHBOARD_INSTALLED=false
 if command -v kubectl &> /dev/null && kubectl get namespace kubernetes-dashboard &> /dev/null; then
     DASHBOARD_INSTALLED=true
-fi
-
-if command -v kubectl &> /dev/null || [ -f /usr/local/bin/kubectl ]; then
-    echo -e "${GREEN}[OK] kubectl${NC}"
-else
-    echo -e "${RED}[!!] kubectl${NC}"
 fi
 
 if command -v k9s &> /dev/null || [ -f /usr/local/bin/k9s ]; then
@@ -560,15 +477,11 @@ else
     fi
 fi
 
-# Dashboard status summary respects headless mode
+# Dashboard status - now installed on all systems
 if [ "$DASHBOARD_INSTALLED" = "true" ]; then
     echo -e "${GREEN}[OK] Kubernetes Dashboard${NC}"
 else
-    if [ "$GUI_AVAILABLE" = "true" ]; then
-        echo -e "${RED}[!!] Kubernetes Dashboard (not installed)${NC}"
-    else
-        echo -e "${GRAY}[--] Kubernetes Dashboard (skipped on headless server)${NC}"
-    fi
+    echo -e "${RED}[!!] Kubernetes Dashboard (not installed)${NC}"
 fi
 
 # Lens summary also respects headless mode
@@ -580,24 +493,6 @@ else
     else
         echo -e "${GRAY}[--] Lens (skipped on headless server)${NC}"
     fi
-fi
-
-if command -v dotnet &> /dev/null; then
-    echo -e "${GREEN}[OK] .NET SDK${NC}"
-else
-    echo -e "${RED}[!!] .NET SDK${NC}"
-fi
-
-if dotnet tool list -g 2>/dev/null | grep -q aspirate; then
-    echo -e "${GREEN}[OK] Aspirate${NC}"
-else
-    echo -e "${YELLOW}[!!] Aspirate (restart terminal)${NC}"
-fi
-
-if command -v sqlcmd &> /dev/null || [ -f /opt/mssql-tools/bin/sqlcmd ]; then
-    echo -e "${GREEN}[OK] mssql-tools (sqlcmd, bcp)${NC}"
-else
-    echo -e "${RED}[!!] mssql-tools${NC}"
 fi
 
 echo ""
@@ -630,26 +525,43 @@ echo ""
 
 if [ "$DASHBOARD_INSTALLED" = "true" ] && [ -f /root/k8s-dashboard-token.txt ]; then
     if [ "$K8S_TYPE" == "k3s" ]; then
-        echo -e "${YELLOW}Dashboard URL:${NC}"
-        echo -e "  ${CYAN}https://localhost:30443${NC}"
+        echo -e "${YELLOW}Dashboard URL (NodePort - accessible remotely):${NC}"
+        echo -e "  ${CYAN}https://<server-ip>:30443${NC}"
+        echo -e "  ${CYAN}https://localhost:30443${NC} (if accessing from this server)"
         echo ""
         echo -e "${YELLOW}Access Token (saved in k8s-dashboard-token.txt):${NC}"
         echo -e "  ${GRAY}$(head -c 60 /root/k8s-dashboard-token.txt)...${NC}"
         echo ""
         echo -e "${YELLOW}To access the dashboard:${NC}"
-        echo -e "  1. Open: ${CYAN}https://localhost:30443${NC}"
-        echo -e "  2. Select 'Token' authentication"
-        echo -e "  3. Paste token from: ${CYAN}cat ~/k8s-dashboard-token.txt${NC}"
+        echo -e "  ${CYAN}Locally:${NC}"
+        echo -e "    1. Open: ${CYAN}https://localhost:30443${NC}"
+        echo -e "    2. Select 'Token' authentication"
+        echo -e "    3. Paste token from: ${CYAN}cat ~/k8s-dashboard-token.txt${NC}"
+        echo ""
+        echo -e "  ${CYAN}Remotely (from another machine):${NC}"
+        echo -e "    1. Open: ${CYAN}https://<server-ip>:30443${NC}"
+        echo -e "    2. Select 'Token' authentication"
+        echo -e "    3. Use token from the server"
+        echo ""
+        echo -e "  ${CYAN}Via SSH Tunnel (more secure):${NC}"
+        echo -e "    1. Run on your local machine: ${GRAY}ssh -L 8443:localhost:30443 user@server-ip${NC}"
+        echo -e "    2. Open: ${CYAN}https://localhost:8443${NC}"
+        echo -e "    3. Use the token"
         echo ""
         echo -e "${GRAY}Note: Accept the self-signed certificate warning${NC}"
     else
         echo -e "${YELLOW}Dashboard Access Options:${NC}"
         echo ""
-        echo -e "${CYAN}Option 1: Use minikube dashboard command:${NC}"
+        echo -e "${CYAN}Option 1: Use minikube dashboard command (local only):${NC}"
         echo -e "  ${GRAY}minikube dashboard${NC}"
         echo ""
-        echo -e "${CYAN}Option 2: Use kubectl port-forward:${NC}"
+        echo -e "${CYAN}Option 2: kubectl port-forward (local):${NC}"
         echo -e "  ${GRAY}kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443${NC}"
+        echo -e "  Then access: ${GRAY}https://localhost:8443${NC}"
+        echo ""
+        echo -e "${CYAN}Option 3: SSH Tunnel for remote access:${NC}"
+        echo -e "  On server: ${GRAY}kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443${NC}"
+        echo -e "  On local machine: ${GRAY}ssh -L 8443:localhost:8443 user@server-ip${NC}"
         echo -e "  Then access: ${GRAY}https://localhost:8443${NC}"
         echo ""
         echo -e "${YELLOW}Access Token (saved in k8s-dashboard-token.txt):${NC}"
@@ -657,12 +569,8 @@ if [ "$DASHBOARD_INSTALLED" = "true" ] && [ -f /root/k8s-dashboard-token.txt ]; 
         echo -e "  Use token from: ${CYAN}cat ~/k8s-dashboard-token.txt${NC}"
     fi
 else
-    echo -e "${GRAY}Kubernetes Dashboard is not configured on this machine.${NC}"
-    if [ "$GUI_AVAILABLE" != "true" ]; then
-        echo -e "${GRAY}It was skipped because this appears to be a headless server (no graphical target).${NC}"
-    else
-        echo -e "${GRAY}You can install it later if you need a web UI for your cluster.${NC}"
-    fi
+    echo -e "${YELLOW}Kubernetes Dashboard installation failed or is incomplete.${NC}"
+    echo -e "${GRAY}Check the installation logs above for errors.${NC}"
 fi
 
 echo ""
@@ -683,18 +591,15 @@ echo ""
 echo -e "${YELLOW}3. Access Kubernetes Dashboard:${NC}"
 if [ "$DASHBOARD_INSTALLED" = "true" ]; then
     if [ "$K8S_TYPE" == "k3s" ]; then
-        echo -e "   ${CYAN}https://localhost:30443${NC}"
+        echo -e "   ${CYAN}https://<server-ip>:30443${NC} or ${CYAN}https://localhost:30443${NC}"
     else
         echo -e "   ${CYAN}minikube dashboard${NC} or"
         echo -e "   ${CYAN}kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443${NC}"
     fi
     echo -e "   Use token from: ${CYAN}cat ~/k8s-dashboard-token.txt${NC}"
+    echo -e "   See 'Kubernetes Dashboard Access' section above for remote access options"
 else
-    if [ "$GUI_AVAILABLE" = "true" ]; then
-        echo -e "   ${GRAY}(Dashboard is not installed. You can install it later if you need a GUI.)${NC}"
-    else
-        echo -e "   ${GRAY}(Skipped: no GUI detected; dashboard is optional on headless servers.)${NC}"
-    fi
+    echo -e "   ${GRAY}Dashboard installation may have failed. Check logs above.${NC}"
 fi
 echo ""
 
@@ -707,13 +612,9 @@ if [ -f "/usr/local/bin/lens" ]; then
     echo ""
 fi
 
-echo -e "${YELLOW}6. Deploy your application with Aspirate:${NC}"
-echo -e "   ${CYAN}aspirate --version${NC}"
-echo ""
-
-echo -e "${YELLOW}7. Connect to SQL Server databases:${NC}"
-echo -e "   ${CYAN}sqlcmd -S <server> -U <username> -P <password>${NC}"
-echo -e "   ${CYAN}bcp <table> in <datafile> -S <server> -U <username> -P <password>${NC}"
+echo -e "${YELLOW}6. Connect to SQL Server in Kubernetes:${NC}"
+echo -e "   ${CYAN}kubectl exec -it <sql-pod-name> -n <namespace> -- /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P '<password>'${NC}"
+echo -e "   Or use port-forward: ${CYAN}kubectl port-forward svc/<sql-service> 1433:1433${NC}"
 echo ""
 
 if [ "$K8S_TYPE" == "minikube" ]; then
