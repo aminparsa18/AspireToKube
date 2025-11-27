@@ -1,8 +1,7 @@
-#!/bin/bash
+﻿#!/bin/bash
 
 # Prerequisites Installation Script for Ubuntu
-# Installs: k9s, k3s OR minikube, Kubernetes Dashboard, Lens (optional)
-# Note: kubectl is included with both k3s and minikube
+# Installation Order: Update System -> firewalld -> k3s -> k9s -> Dashboard -> Lens -> jq -> Python3/cryptography
 
 set -e
 
@@ -25,36 +24,109 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Update system
-echo -e "${YELLOW}[1/6] Updating system...${NC}"
+# [1/8] Update system
+echo -e "${YELLOW}[1/8] Updating system...${NC}"
 apt-get update -y
 apt-get upgrade -y
 echo -e "${GREEN}System updated${NC}"
 echo ""
 
-# Choose Kubernetes implementation
-echo -e "${YELLOW}[2/6] Choose Kubernetes implementation:${NC}"
-echo -e "${CYAN}1) k3s (Lightweight Kubernetes, recommended for production)${NC}"
-echo -e "${CYAN}2) minikube (Development focused, single-node cluster)${NC}"
-echo ""
-read -p "Enter your choice (1 or 2): " K8S_CHOICE
-
-while [[ ! "$K8S_CHOICE" =~ ^[12]$ ]]; do
-    echo -e "${RED}Invalid choice. Please enter 1 or 2.${NC}"
-    read -p "Enter your choice (1 or 2): " K8S_CHOICE
-done
-
-if [ "$K8S_CHOICE" == "1" ]; then
-    K8S_TYPE="k3s"
-    echo -e "${GREEN}Selected: k3s${NC}"
+# [2/8] Install firewalld
+echo -e "${YELLOW}[2/8] Installing firewalld...${NC}"
+if command -v firewall-cmd &> /dev/null; then
+    echo -e "${GREEN}firewalld already installed${NC}"
+    firewall-cmd --version 2>/dev/null || true
 else
-    K8S_TYPE="minikube"
-    echo -e "${GREEN}Selected: minikube${NC}"
+    echo -e "${CYAN}Installing firewalld...${NC}"
+    apt-get install -y firewalld
+    
+    # Start and enable firewalld
+    systemctl start firewalld
+    systemctl enable firewalld
+    
+    echo -e "${GREEN}firewalld installed and started${NC}"
 fi
 echo ""
 
-# Install k9s
-echo -e "${YELLOW}[3/7] Installing k9s...${NC}"
+# [3/8] Install k3s
+echo -e "${YELLOW}[3/8] Installing k3s (Kubernetes cluster)...${NC}"
+
+if command -v k3s &> /dev/null; then
+    echo -e "${GREEN}k3s already installed${NC}"
+    k3s --version
+else
+    echo -e "${CYAN}Installing k3s...${NC}"
+    curl -sfL https://get.k3s.io | sh -
+    
+    # Wait for k3s to be ready
+    echo -e "${CYAN}Waiting for k3s to be ready...${NC}"
+    sleep 10
+    
+    # Configure kubectl to use k3s
+    mkdir -p ~/.kube
+    cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+    chmod 600 ~/.kube/config
+    
+    # Set KUBECONFIG environment variable
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+    if ! grep -q "KUBECONFIG=/etc/rancher/k3s/k3s.yaml" /root/.bashrc; then
+        echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> /root/.bashrc
+    fi
+    
+    # Also configure for sudo user
+    if [ "$SUDO_USER" ]; then
+        SUDO_HOME=$(eval echo ~$SUDO_USER)
+        mkdir -p "$SUDO_HOME/.kube"
+        cp /etc/rancher/k3s/k3s.yaml "$SUDO_HOME/.kube/config"
+        chown -R $SUDO_USER:$SUDO_USER "$SUDO_HOME/.kube"
+        chmod 600 "$SUDO_HOME/.kube/config"
+        
+        if ! grep -q "KUBECONFIG" "$SUDO_HOME/.bashrc" 2>/dev/null; then
+            echo "export KUBECONFIG=$SUDO_HOME/.kube/config" >> "$SUDO_HOME/.bashrc"
+        fi
+    fi
+    
+    if command -v k3s &> /dev/null; then
+        echo -e "${GREEN}k3s installed successfully${NC}"
+        k3s --version
+    else
+        echo -e "${RED}k3s installation failed${NC}"
+    fi
+fi
+
+# Configure firewall for k3s
+if systemctl is-active --quiet firewalld; then
+    echo -e "${CYAN}Configuring firewall rules for k3s...${NC}"
+    
+    # k3s ports
+    firewall-cmd --permanent --add-port=6443/tcp    # k3s API server
+    firewall-cmd --permanent --add-port=10250/tcp   # kubelet metrics
+    firewall-cmd --permanent --add-port=8472/udp    # flannel VXLAN
+    
+    # Common service ports
+    firewall-cmd --permanent --add-port=80/tcp      # HTTP
+    firewall-cmd --permanent --add-port=443/tcp     # HTTPS
+    firewall-cmd --permanent --add-port=8080/tcp    # Common app port
+    firewall-cmd --permanent --add-port=1433/tcp    # SQL Server
+    
+    # Dashboard
+    firewall-cmd --permanent --add-port=30443/tcp   # Dashboard NodePort
+    firewall-cmd --permanent --add-port=8443/tcp    # Dashboard port-forward
+    
+    # NodePort range
+    firewall-cmd --permanent --add-port=30000-32767/tcp  # k3s NodePort range
+    
+    # Reload firewall
+    firewall-cmd --reload
+    
+    echo -e "${GREEN}Firewall configured for k3s${NC}"
+else
+    echo -e "${YELLOW}firewalld is not active${NC}"
+fi
+echo ""
+
+# [4/8] Install k9s
+echo -e "${YELLOW}[4/8] Installing k9s...${NC}"
 
 if command -v k9s &> /dev/null; then
     echo -e "${GREEN}k9s already installed${NC}"
@@ -92,185 +164,29 @@ else
 fi
 echo ""
 
-# Install either k3s or minikube based on user choice
-echo -e "${YELLOW}[4/7] Installing $K8S_TYPE (Kubernetes cluster)...${NC}"
+# [5/8] Install Kubernetes Dashboard
+echo -e "${YELLOW}[5/8] Installing Kubernetes Dashboard...${NC}"
 
-if [ "$K8S_TYPE" == "k3s" ]; then
-    # Install k3s
-    if command -v k3s &> /dev/null; then
-        echo -e "${GREEN}k3s already installed${NC}"
-        k3s --version
-    else
-        echo -e "${CYAN}Installing k3s...${NC}"
-        curl -sfL https://get.k3s.io | sh -
-        
-        # Wait for k3s to be ready
-        echo -e "${CYAN}Waiting for k3s to be ready...${NC}"
-        sleep 10
-        
-        # Configure kubectl to use k3s
-        mkdir -p ~/.kube
-        cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-        chmod 600 ~/.kube/config
-        
-        # Set KUBECONFIG environment variable
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        if ! grep -q "KUBECONFIG=/etc/rancher/k3s/k3s.yaml" /root/.bashrc; then
-            echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> /root/.bashrc
-        fi
-        
-        # Also configure for sudo user
-        if [ "$SUDO_USER" ]; then
-            SUDO_HOME=$(eval echo ~$SUDO_USER)
-            mkdir -p "$SUDO_HOME/.kube"
-            cp /etc/rancher/k3s/k3s.yaml "$SUDO_HOME/.kube/config"
-            chown -R $SUDO_USER:$SUDO_USER "$SUDO_HOME/.kube"
-            chmod 600 "$SUDO_HOME/.kube/config"
-            
-            if ! grep -q "KUBECONFIG" "$SUDO_HOME/.bashrc" 2>/dev/null; then
-                echo "export KUBECONFIG=$SUDO_HOME/.kube/config" >> "$SUDO_HOME/.bashrc"
-            fi
-        fi
-        
-        if command -v k3s &> /dev/null; then
-            echo -e "${GREEN}k3s installed successfully${NC}"
-            k3s --version
-        else
-            echo -e "${RED}k3s installation failed${NC}"
-        fi
-    fi
-else
-    # Install minikube
-    if command -v minikube &> /dev/null; then
-        echo -e "${GREEN}minikube already installed${NC}"
-        minikube version
-    else
-        echo -e "${CYAN}Installing dependencies for minikube...${NC}"
-        
-        # Install required packages
-        apt-get install -y conntrack socat
-        
-        # Check if running in a VM or physical machine
-        if systemctl is-active --quiet libvirtd || grep -E '(vmx|svm)' /proc/cpuinfo > /dev/null; then
-            echo -e "${CYAN}Installing KVM/libvirt for minikube (VM driver)...${NC}"
-            apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst virt-manager
-            systemctl start libvirtd
-            systemctl enable libvirtd
-            
-            # Add user to libvirt group
-            if [ "$SUDO_USER" ]; then
-                usermod -aG libvirt $SUDO_USER
-            fi
-            
-            MINIKUBE_DRIVER="kvm2"
-        else
-            echo -e "${YELLOW}No virtualization detected, will use Docker driver${NC}"
-            # Install Docker
-            echo -e "${CYAN}Installing Docker for minikube...${NC}"
-            
-            # Remove old Docker packages if they exist
-            apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
-            
-            # Install Docker prerequisites
-            apt-get install -y ca-certificates curl gnupg lsb-release
-            
-            # Add Docker GPG key
-            install -m 0755 -d /etc/apt/keyrings
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-            chmod a+r /etc/apt/keyrings/docker.gpg
-            
-            # Add Docker repository
-            echo \
-              "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-              $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-            
-            # Install Docker
-            apt-get update -y
-            apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-            
-            # Start and enable Docker
-            systemctl start docker
-            systemctl enable docker
-            
-            # Add user to docker group
-            if [ "$SUDO_USER" ]; then
-                usermod -aG docker $SUDO_USER
-            fi
-            
-            MINIKUBE_DRIVER="docker"
-        fi
-        
-        echo -e "${CYAN}Downloading minikube...${NC}"
-        cd /tmp
-        curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-        
-        if [ -f minikube-linux-amd64 ]; then
-            chmod +x minikube-linux-amd64
-            mv minikube-linux-amd64 /usr/local/bin/minikube
-            
-            # Verify installation
-            if [ -f /usr/local/bin/minikube ] && command -v minikube &> /dev/null; then
-                echo -e "${GREEN}minikube installed successfully${NC}"
-                minikube version
-                
-                # Start minikube
-                echo -e "${CYAN}Starting minikube cluster with $MINIKUBE_DRIVER driver...${NC}"
-                # minikube doesn't like running as root with docker unless you use --force
-                if [ "$(id -u)" -eq 0 ] && [ "$MINIKUBE_DRIVER" = "docker" ]; then
-                    minikube start --driver="$MINIKUBE_DRIVER" --force
-                else
-                    minikube start --driver="$MINIKUBE_DRIVER"
-                fi
-                
-                # Configure kubectl
-                echo -e "${CYAN}Configuring kubectl for minikube...${NC}"
-                minikube kubectl -- get pods -A > /dev/null 2>&1
-                
-                # Setup kubeconfig
-                mkdir -p ~/.kube
-                minikube update-context
-                
-                # Also configure for sudo user
-                if [ "$SUDO_USER" ]; then
-                    SUDO_HOME=$(eval echo ~$SUDO_USER)
-                    sudo -u $SUDO_USER minikube update-context 2>/dev/null || true
-                fi
-                
-                echo -e "${GREEN}minikube cluster started successfully${NC}"
-                minikube status
-            else
-                echo -e "${RED}minikube installation failed${NC}"
-            fi
-        else
-            echo -e "${RED}minikube download failed${NC}"
-        fi
-    fi
-fi
-echo ""
-
-# Install Kubernetes Dashboard
-echo -e "${YELLOW}[5/7] Installing Kubernetes Dashboard...${NC}"
-
-# Set KUBECONFIG based on the chosen implementation
-if [ "$K8S_TYPE" == "k3s" ]; then
-    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-fi
+# Set KUBECONFIG for k3s
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 if kubectl get namespace kubernetes-dashboard &> /dev/null; then
     echo -e "${GREEN}Kubernetes Dashboard already installed${NC}"
 else
-        echo -e "${CYAN}Deploying Kubernetes Dashboard...${NC}"
-        
-        # Apply the official dashboard manifest
-        kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
-        
-        echo -e "${CYAN}Waiting for dashboard pods to be ready...${NC}"
-        sleep 5
-        
-        # Create admin service account
-        echo -e "${CYAN}Creating admin service account...${NC}"
-        
-        cat <<EOF | kubectl apply -f -
+    echo -e "${CYAN}Installing Kubernetes Dashboard...${NC}"
+    
+    # Install dashboard
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
+    
+    # Wait for dashboard to be ready
+    echo -e "${CYAN}Waiting for dashboard pods to be ready...${NC}"
+    sleep 10
+    kubectl wait --for=condition=ready pod -l k8s-app=kubernetes-dashboard -n kubernetes-dashboard --timeout=120s 2>/dev/null || true
+    
+    # Create service account for dashboard access
+    echo -e "${CYAN}Creating dashboard service account...${NC}"
+    
+    cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -290,54 +206,36 @@ subjects:
   name: admin-user
   namespace: kubernetes-dashboard
 EOF
-        
-        echo -e "${CYAN}Waiting for service account to be created...${NC}"
-        sleep 3
-        
-        # Create token for admin user
-        echo -e "${CYAN}Generating access token...${NC}"
-        DASHBOARD_TOKEN=$(kubectl -n kubernetes-dashboard create token admin-user --duration=87600h 2>/dev/null || echo "")
-        
-        if [ -n "$DASHBOARD_TOKEN" ]; then
-            # Save token to file
-            echo "$DASHBOARD_TOKEN" > /root/k8s-dashboard-token.txt
-            chmod 600 /root/k8s-dashboard-token.txt
-            
-            if [ "$SUDO_USER" ]; then
-                SUDO_HOME=$(eval echo ~$SUDO_USER)
-                echo "$DASHBOARD_TOKEN" > "$SUDO_HOME/k8s-dashboard-token.txt"
-                chown $SUDO_USER:$SUDO_USER "$SUDO_HOME/k8s-dashboard-token.txt"
-                chmod 600 "$SUDO_HOME/k8s-dashboard-token.txt"
-            fi
-            
-            echo -e "${GREEN}Dashboard token saved to k8s-dashboard-token.txt${NC}"
-        fi
-        
-        # Configure dashboard access based on k8s type
-        if [ "$K8S_TYPE" == "k3s" ]; then
-            # Patch dashboard service to use NodePort
-            echo -e "${CYAN}Configuring dashboard access for k3s...${NC}"
-            kubectl patch svc kubernetes-dashboard -n kubernetes-dashboard --type='json' -p \
-'[{"op":"replace","path":"/spec/type","value":"NodePort"},{"op":"add","path":"/spec/ports/0/nodePort","value":30443}]' \
-2>/dev/null || {
-                echo -e "${YELLOW}Dashboard service may already be configured${NC}"
-            }
-            DASHBOARD_URL="https://localhost:30443"
-        else
-            # For minikube, we'll use port-forwarding
-            echo -e "${CYAN}Dashboard will be accessible via minikube dashboard command or port-forward${NC}"
-            DASHBOARD_URL="Use: minikube dashboard or kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443"
-        fi
-        
-        echo -e "${GREEN}Kubernetes Dashboard installed successfully${NC}"
-        echo ""
-        echo -e "${CYAN}Dashboard access: $DASHBOARD_URL${NC}"
-        echo -e "${CYAN}Use the token from: k8s-dashboard-token.txt${NC}"
+    
+    # Get access token
+    echo -e "${CYAN}Generating access token...${NC}"
+    sleep 5
+    
+    # Create token and save it
+    kubectl -n kubernetes-dashboard create token admin-user --duration=87600h > /root/k8s-dashboard-token.txt 2>/dev/null || \
+        kubectl -n kubernetes-dashboard get secret $(kubectl -n kubernetes-dashboard get sa/admin-user -o jsonpath="{.secrets[0].name}") -o go-template="{{.data.token | base64decode}}" > /root/k8s-dashboard-token.txt 2>/dev/null || \
+        echo "Failed to get token" > /root/k8s-dashboard-token.txt
+    
+    chmod 600 /root/k8s-dashboard-token.txt
+    
+    # Also save for sudo user if exists
+    if [ "$SUDO_USER" ]; then
+        SUDO_HOME=$(eval echo ~$SUDO_USER)
+        cp /root/k8s-dashboard-token.txt "$SUDO_HOME/k8s-dashboard-token.txt"
+        chown $SUDO_USER:$SUDO_USER "$SUDO_HOME/k8s-dashboard-token.txt"
+        chmod 600 "$SUDO_HOME/k8s-dashboard-token.txt"
+    fi
+    
+    # Expose dashboard as NodePort for easier access
+    echo -e "${CYAN}Exposing dashboard via NodePort...${NC}"
+    kubectl patch svc kubernetes-dashboard -n kubernetes-dashboard -p '{"spec":{"type":"NodePort","ports":[{"port":443,"targetPort":8443,"nodePort":30443}]}}'
+    
+    echo -e "${GREEN}Kubernetes Dashboard installed successfully${NC}"
 fi
 echo ""
 
-# Lens installation (optional)
-echo -e "${YELLOW}[6/7] Lens installation (Kubernetes IDE)...${NC}"
+# [6/8] Lens installation (optional)
+echo -e "${YELLOW}[6/8] Lens installation (Kubernetes IDE - optional)...${NC}"
 
 # Only makes sense on machines with a graphical desktop
 LENS_GUI_AVAILABLE=false
@@ -360,6 +258,7 @@ if [ "$LENS_GUI_AVAILABLE" != "true" ]; then
 else
     # Add timeout in case script is run non-interactively
     read -t 30 -p "Do you want to install Lens? (y/n): " INSTALL_LENS || INSTALL_LENS="n"
+    echo ""
 
     if [[ "$INSTALL_LENS" =~ ^[Yy]$ ]]; then
         if [ -f "/usr/local/bin/lens" ]; then
@@ -406,25 +305,41 @@ EOF
 fi
 echo ""
 
-# Configure firewall (UFW on Ubuntu)
-echo -e "${YELLOW}[7/7] Configuring firewall...${NC}"
-if command -v ufw &> /dev/null; then
-    # Check if UFW is active
-    if ufw status | grep -q "Status: active"; then
-        ufw allow 30000:32767/tcp 2>/dev/null || true
-        ufw allow 6443/tcp 2>/dev/null || true
-        ufw allow 80/tcp 2>/dev/null || true
-        ufw allow 443/tcp 2>/dev/null || true
-        ufw allow 8080/tcp 2>/dev/null || true
-        ufw allow 30443/tcp 2>/dev/null || true  # Dashboard
-        ufw allow 8443/tcp 2>/dev/null || true   # Dashboard port-forward
-        ufw reload 2>/dev/null || true
-        echo -e "${GREEN}Firewall configured${NC}"
-    else
-        echo -e "${YELLOW}UFW is not active, skipping firewall configuration${NC}"
-    fi
+# [7/8] Install jq (JSON processor)
+echo -e "${YELLOW}[7/8] Installing jq (JSON processor)...${NC}"
+if command -v jq &> /dev/null; then
+    echo -e "${GREEN}jq already installed: $(jq --version)${NC}"
 else
-    echo -e "${YELLOW}UFW not found, skipping firewall configuration${NC}"
+    apt-get install -y jq
+    echo -e "${GREEN}jq installed successfully${NC}"
+fi
+echo ""
+
+# [8/8] Install Python3 and cryptography
+echo -e "${YELLOW}[8/8] Installing Python3 and cryptography library...${NC}"
+
+# Install Python3 and pip
+if command -v python3 &> /dev/null; then
+    echo -e "${GREEN}Python3 already installed: $(python3 --version)${NC}"
+else
+    apt-get install -y python3 python3-pip python3-venv
+    echo -e "${GREEN}Python3 installed successfully${NC}"
+fi
+
+if command -v pip3 &> /dev/null; then
+    echo -e "${GREEN}pip3 already installed: $(pip3 --version)${NC}"
+else
+    apt-get install -y python3-pip
+    echo -e "${GREEN}pip3 installed successfully${NC}"
+fi
+
+# Install Python cryptography library
+if python3 -c "import cryptography" 2>/dev/null; then
+    echo -e "${GREEN}cryptography library already installed${NC}"
+    python3 -c "import cryptography; print(f'Version: {cryptography.__version__}')"
+else
+    pip3 install --break-system-packages cryptography
+    echo -e "${GREEN}cryptography library installed successfully${NC}"
 fi
 echo ""
 
@@ -439,60 +354,64 @@ echo ""
 
 # Refresh PATH before checking
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
-if [ "$K8S_TYPE" == "k3s" ]; then
-    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-fi
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-# Detect if this is a GUI machine (graphical target) or headless
-GUI_AVAILABLE=false
-if command -v systemctl &> /dev/null; then
-    if systemctl get-default 2>/dev/null | grep -q "graphical.target"; then
-        GUI_AVAILABLE=true
+# Check all components in installation order
+if command -v firewall-cmd &> /dev/null; then
+    echo -e "${GREEN}[OK] firewalld${NC}"
+    if systemctl is-active --quiet firewalld; then
+        echo -e "${GREEN}    └─ Status: Active${NC}"
+    else
+        echo -e "${YELLOW}    └─ Status: Inactive${NC}"
     fi
+else
+    echo -e "${RED}[!!] firewalld${NC}"
 fi
 
-# Detect if Kubernetes Dashboard is installed
-DASHBOARD_INSTALLED=false
-if command -v kubectl &> /dev/null && kubectl get namespace kubernetes-dashboard &> /dev/null; then
-    DASHBOARD_INSTALLED=true
+if command -v k3s &> /dev/null; then
+    echo -e "${GREEN}[OK] k3s (Kubernetes cluster)${NC}"
+else
+    echo -e "${RED}[!!] k3s${NC}"
 fi
 
-if command -v k9s &> /dev/null || [ -f /usr/local/bin/k9s ]; then
+if command -v k9s &> /dev/null; then
     echo -e "${GREEN}[OK] k9s${NC}"
 else
     echo -e "${RED}[!!] k9s${NC}"
 fi
 
-if [ "$K8S_TYPE" == "k3s" ]; then
-    if command -v k3s &> /dev/null; then
-        echo -e "${GREEN}[OK] k3s (Kubernetes cluster)${NC}"
-    else
-        echo -e "${RED}[!!] k3s${NC}"
-    fi
-else
-    if command -v minikube &> /dev/null; then
-        echo -e "${GREEN}[OK] minikube (Kubernetes cluster)${NC}"
-    else
-        echo -e "${RED}[!!] minikube${NC}"
-    fi
-fi
-
-# Dashboard status - now installed on all systems
-if [ "$DASHBOARD_INSTALLED" = "true" ]; then
+if kubectl get namespace kubernetes-dashboard &> /dev/null; then
     echo -e "${GREEN}[OK] Kubernetes Dashboard${NC}"
 else
-    echo -e "${RED}[!!] Kubernetes Dashboard (not installed)${NC}"
+    echo -e "${RED}[!!] Kubernetes Dashboard${NC}"
 fi
 
-# Lens summary also respects headless mode
 if [ -f "/usr/local/bin/lens" ]; then
     echo -e "${GREEN}[OK] Lens${NC}"
 else
-    if [ "$GUI_AVAILABLE" = "true" ]; then
+    if [ "$LENS_GUI_AVAILABLE" = "true" ]; then
         echo -e "${GRAY}[--] Lens (not installed)${NC}"
     else
         echo -e "${GRAY}[--] Lens (skipped on headless server)${NC}"
     fi
+fi
+
+if command -v jq &> /dev/null; then
+    echo -e "${GREEN}[OK] jq${NC}"
+else
+    echo -e "${RED}[!!] jq${NC}"
+fi
+
+if command -v python3 &> /dev/null; then
+    echo -e "${GREEN}[OK] Python3${NC}"
+else
+    echo -e "${RED}[!!] Python3${NC}"
+fi
+
+if python3 -c "import cryptography" 2>/dev/null; then
+    echo -e "${GREEN}[OK] cryptography library${NC}"
+else
+    echo -e "${RED}[!!] cryptography library${NC}"
 fi
 
 echo ""
@@ -504,7 +423,7 @@ echo ""
 # Verify cluster is running
 if command -v kubectl &> /dev/null; then
     echo -e "${CYAN}Checking cluster status...${NC}"
-    sleep 5
+    sleep 3
     
     if kubectl get nodes 2>/dev/null; then
         echo ""
@@ -519,59 +438,78 @@ fi
 
 echo ""
 echo "================================================"
+echo "  Firewall Status"
+echo "================================================"
+echo ""
+
+if systemctl is-active --quiet firewalld; then
+    echo -e "${GREEN}Firewall is active${NC}"
+    echo ""
+    echo -e "${CYAN}Open ports:${NC}"
+    firewall-cmd --list-ports | tr ' ' '\n' | sort
+    echo ""
+    echo -e "${CYAN}Active services:${NC}"
+    firewall-cmd --list-services
+else
+    echo -e "${YELLOW}Firewall is not active${NC}"
+fi
+
+echo ""
+echo "================================================"
 echo "  Kubernetes Dashboard Access"
 echo "================================================"
 echo ""
 
-if [ "$DASHBOARD_INSTALLED" = "true" ] && [ -f /root/k8s-dashboard-token.txt ]; then
-    if [ "$K8S_TYPE" == "k3s" ]; then
-        echo -e "${YELLOW}Dashboard URL (NodePort - accessible remotely):${NC}"
-        echo -e "  ${CYAN}https://<server-ip>:30443${NC}"
-        echo -e "  ${CYAN}https://localhost:30443${NC} (if accessing from this server)"
-        echo ""
-        echo -e "${YELLOW}Access Token (saved in k8s-dashboard-token.txt):${NC}"
+if kubectl get namespace kubernetes-dashboard &> /dev/null && [ -f /root/k8s-dashboard-token.txt ]; then
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    
+    echo -e "${YELLOW}Dashboard URL (NodePort - accessible remotely):${NC}"
+    echo -e "  ${CYAN}https://${SERVER_IP}:30443${NC}"
+    echo -e "  ${CYAN}https://localhost:30443${NC} (if accessing from this server)"
+    echo ""
+    echo -e "${YELLOW}Access Token (saved in k8s-dashboard-token.txt):${NC}"
+    if [ -s /root/k8s-dashboard-token.txt ]; then
         echo -e "  ${GRAY}$(head -c 60 /root/k8s-dashboard-token.txt)...${NC}"
-        echo ""
-        echo -e "${YELLOW}To access the dashboard:${NC}"
-        echo -e "  ${CYAN}Locally:${NC}"
-        echo -e "    1. Open: ${CYAN}https://localhost:30443${NC}"
-        echo -e "    2. Select 'Token' authentication"
-        echo -e "    3. Paste token from: ${CYAN}cat ~/k8s-dashboard-token.txt${NC}"
-        echo ""
-        echo -e "  ${CYAN}Remotely (from another machine):${NC}"
-        echo -e "    1. Open: ${CYAN}https://<server-ip>:30443${NC}"
-        echo -e "    2. Select 'Token' authentication"
-        echo -e "    3. Use token from the server"
-        echo ""
-        echo -e "  ${CYAN}Via SSH Tunnel (more secure):${NC}"
-        echo -e "    1. Run on your local machine: ${GRAY}ssh -L 8443:localhost:30443 user@server-ip${NC}"
-        echo -e "    2. Open: ${CYAN}https://localhost:8443${NC}"
-        echo -e "    3. Use the token"
-        echo ""
-        echo -e "${GRAY}Note: Accept the self-signed certificate warning${NC}"
     else
-        echo -e "${YELLOW}Dashboard Access Options:${NC}"
-        echo ""
-        echo -e "${CYAN}Option 1: Use minikube dashboard command (local only):${NC}"
-        echo -e "  ${GRAY}minikube dashboard${NC}"
-        echo ""
-        echo -e "${CYAN}Option 2: kubectl port-forward (local):${NC}"
-        echo -e "  ${GRAY}kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443${NC}"
-        echo -e "  Then access: ${GRAY}https://localhost:8443${NC}"
-        echo ""
-        echo -e "${CYAN}Option 3: SSH Tunnel for remote access:${NC}"
-        echo -e "  On server: ${GRAY}kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443${NC}"
-        echo -e "  On local machine: ${GRAY}ssh -L 8443:localhost:8443 user@server-ip${NC}"
-        echo -e "  Then access: ${GRAY}https://localhost:8443${NC}"
-        echo ""
-        echo -e "${YELLOW}Access Token (saved in k8s-dashboard-token.txt):${NC}"
-        echo -e "  ${GRAY}$(head -c 60 /root/k8s-dashboard-token.txt)...${NC}"
-        echo -e "  Use token from: ${CYAN}cat ~/k8s-dashboard-token.txt${NC}"
+        echo -e "  ${RED}Token file is empty or missing${NC}"
     fi
+    echo ""
+    echo -e "${YELLOW}To access the dashboard:${NC}"
+    echo -e "  ${CYAN}Locally:${NC}"
+    echo -e "    1. Open: ${CYAN}https://localhost:30443${NC}"
+    echo -e "    2. Select 'Token' authentication"
+    echo -e "    3. Paste token from: ${CYAN}cat ~/k8s-dashboard-token.txt${NC}"
+    echo ""
+    echo -e "  ${CYAN}Remotely (from another machine):${NC}"
+    echo -e "    1. Open: ${CYAN}https://${SERVER_IP}:30443${NC}"
+    echo -e "    2. Select 'Token' authentication"
+    echo -e "    3. Use token from the server"
+    echo ""
+    echo -e "  ${CYAN}Via SSH Tunnel (more secure):${NC}"
+    echo -e "    1. Run on your local machine: ${GRAY}ssh -L 8443:localhost:30443 user@${SERVER_IP}${NC}"
+    echo -e "    2. Open: ${CYAN}https://localhost:8443${NC}"
+    echo -e "    3. Use the token"
+    echo ""
+    echo -e "${GRAY}Note: Accept the self-signed certificate warning${NC}"
 else
     echo -e "${YELLOW}Kubernetes Dashboard installation failed or is incomplete.${NC}"
     echo -e "${GRAY}Check the installation logs above for errors.${NC}"
 fi
+
+echo ""
+echo "================================================"
+echo "  Aspire Secret Decryption Ready"
+echo "================================================"
+echo ""
+
+echo -e "${GREEN}All dependencies for Aspire secret decryption are installed:${NC}"
+echo -e "  ✓ jq - for parsing aspirate-state.json"
+echo -e "  ✓ Python3 - for running decrypt-secrets.py"
+echo -e "  ✓ cryptography - for AES-GCM decryption"
+echo ""
+echo -e "${YELLOW}You can now decrypt your Aspire secrets:${NC}"
+echo -e "  ${CYAN}./decrypt-secrets.py${NC}"
+echo ""
 
 echo ""
 echo "================================================"
@@ -589,18 +527,8 @@ echo -e "   ${CYAN}kubectl get pods -A${NC}"
 echo ""
 
 echo -e "${YELLOW}3. Access Kubernetes Dashboard:${NC}"
-if [ "$DASHBOARD_INSTALLED" = "true" ]; then
-    if [ "$K8S_TYPE" == "k3s" ]; then
-        echo -e "   ${CYAN}https://<server-ip>:30443${NC} or ${CYAN}https://localhost:30443${NC}"
-    else
-        echo -e "   ${CYAN}minikube dashboard${NC} or"
-        echo -e "   ${CYAN}kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443${NC}"
-    fi
-    echo -e "   Use token from: ${CYAN}cat ~/k8s-dashboard-token.txt${NC}"
-    echo -e "   See 'Kubernetes Dashboard Access' section above for remote access options"
-else
-    echo -e "   ${GRAY}Dashboard installation may have failed. Check logs above.${NC}"
-fi
+echo -e "   ${CYAN}https://<server-ip>:30443${NC} or ${CYAN}https://localhost:30443${NC}"
+echo -e "   Use token from: ${CYAN}cat ~/k8s-dashboard-token.txt${NC}"
 echo ""
 
 echo -e "${YELLOW}4. Use k9s to manage your cluster:${NC}"
@@ -612,20 +540,21 @@ if [ -f "/usr/local/bin/lens" ]; then
     echo ""
 fi
 
-echo -e "${YELLOW}6. Connect to SQL Server in Kubernetes:${NC}"
-echo -e "   ${CYAN}kubectl exec -it <sql-pod-name> -n <namespace> -- /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P '<password>'${NC}"
+echo -e "${YELLOW}6. Deploy your Aspire application:${NC}"
+echo -e "   ${CYAN}# Decrypt secrets first:${NC}"
+echo -e "   ${CYAN}./decrypt-secrets.py${NC}"
+echo -e "   ${CYAN}# Then deploy:${NC}"
+echo -e "   ${CYAN}./deploy2k3s.sh${NC}"
+echo ""
+
+echo -e "${YELLOW}7. Check firewall status:${NC}"
+echo -e "   ${CYAN}firewall-cmd --list-all${NC}"
+echo ""
+
+echo -e "${YELLOW}8. Connect to SQL Server in Kubernetes:${NC}"
+echo -e "   ${CYAN}kubectl exec -it <sql-pod-name> -- /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P '<password>'${NC}"
 echo -e "   Or use port-forward: ${CYAN}kubectl port-forward svc/<sql-service> 1433:1433${NC}"
 echo ""
 
-if [ "$K8S_TYPE" == "minikube" ]; then
-    echo -e "${YELLOW}Minikube specific commands:${NC}"
-    echo -e "   ${CYAN}minikube status${NC} - Check cluster status"
-    echo -e "   ${CYAN}minikube stop${NC} - Stop the cluster"
-    echo -e "   ${CYAN}minikube start${NC} - Start the cluster"
-    echo -e "   ${CYAN}minikube delete${NC} - Delete the cluster"
-    echo -e "   ${CYAN}minikube service <service-name>${NC} - Access a service"
-    echo ""
-fi
-
 echo -e "${GREEN}Installation complete!${NC}"
-echo -e "${GREEN}Your Kubernetes environment is ready!${NC}"
+echo -e "${GREEN}Your Kubernetes environment is ready for Aspire deployments!${NC}"

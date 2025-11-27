@@ -21,7 +21,7 @@ spec:
       containers:
       - name: apiservice
         image: apiservice:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
         - name: http
           containerPort: 8080
@@ -30,4 +30,6 @@ spec:
         envFrom:
         - configMapRef:
             name: apiservice-env
+        - secretRef:
+            name: apiservice-secrets
       terminationGracePeriodSeconds: 180

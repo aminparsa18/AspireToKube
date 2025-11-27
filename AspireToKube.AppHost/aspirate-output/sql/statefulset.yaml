@@ -19,7 +19,7 @@ spec:
       containers:
         - name: sql
           image: mcr.microsoft.com/mssql/server:2022-latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 1433
           envFrom:

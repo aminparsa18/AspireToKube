@@ -15,7 +15,7 @@ configMapGenerator:
     - HTTP_PORTS=8080
     - CACHE_HOST=cache
     - CACHE_PORT=6379
-    - CACHE_PASSWORD=6RHVJzCBnMFZSBHeDpG9V8
+    - CACHE_PASSWORD=kYNfFscUuwLbTolIlwyhT2
     - CACHE_URI=redis://:{cache-password-uri-encoded.value}@cache:6379
     - APISERVICE_HTTP=http://apiservice:8080
     - services__apiservice__http__0=http://apiservice:8080

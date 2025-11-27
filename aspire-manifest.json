@@ -38,7 +38,7 @@
       "image": "mcr.microsoft.com/mssql/server:2022-latest",
       "volumes": [
         {
-          "name": "aspiretokube.apphost-f803b4d667-sql-data",
+          "name": "aspiretokube.apphost-3d3851b8ec-sql-data",
           "target": "/var/opt/mssql",
           "readOnly": false
         }
@@ -62,7 +62,7 @@
     },
     "apiservice": {
       "type": "project.v0",
-      "path": "../AspireToKube.ApiService/AspireToKube.ApiService.csproj",
+      "path": "AspireToKube.ApiService/AspireToKube.ApiService.csproj",
       "env": {
         "OTEL_DOTNET_EXPERIMENTAL_OTLP_EMIT_EXCEPTION_LOG_ATTRIBUTES": "true",
         "OTEL_DOTNET_EXPERIMENTAL_OTLP_EMIT_EVENT_LOG_ATTRIBUTES": "true",
@@ -93,7 +93,7 @@
     },
     "webfrontend": {
       "type": "project.v0",
-      "path": "../AspireToKube.Web/AspireToKube.Web.csproj",
+      "path": "AspireToKube.Web/AspireToKube.Web.csproj",
       "env": {
         "OTEL_DOTNET_EXPERIMENTAL_OTLP_EMIT_EXCEPTION_LOG_ATTRIBUTES": "true",
         "OTEL_DOTNET_EXPERIMENTAL_OTLP_EMIT_EVENT_LOG_ATTRIBUTES": "true",

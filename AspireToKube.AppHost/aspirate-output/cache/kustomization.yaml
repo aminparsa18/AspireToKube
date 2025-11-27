@@ -8,7 +8,7 @@ generatorOptions:
 configMapGenerator:
 - name: cache-env
   literals:
-    - REDIS_PASSWORD=6RHVJzCBnMFZSBHeDpG9V8
+    - REDIS_PASSWORD=kYNfFscUuwLbTolIlwyhT2
     - OTEL_EXPORTER_OTLP_ENDPOINT=http://aspire-dashboard:18889
     - OTEL_SERVICE_NAME=cache
 

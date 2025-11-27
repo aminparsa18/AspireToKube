@@ -13,7 +13,18 @@ configMapGenerator:
     - OTEL_DOTNET_EXPERIMENTAL_OTLP_RETRY=in_memory
     - ASPNETCORE_FORWARDEDHEADERS_ENABLED=true
     - HTTP_PORTS=8080
+    - ECSDB_HOST=sql
+    - ECSDB_PORT=1433
+    - ECSDB_USERNAME=sa
+    - ECSDB_PASSWORD=54Delta45!
+    - ECSDB_URI=mssql://sql:1433/ecsdb
+    - ECSDB_JDBCCONNECTIONSTRING=jdbc:sqlserver://sql:1433;trustServerCertificate=true;databaseName=ecsdb
+    - ECSDB_DATABASE=ecsdb
     - OTEL_EXPORTER_OTLP_ENDPOINT=http://aspire-dashboard:18889
     - OTEL_SERVICE_NAME=apiservice
     - ASPNETCORE_URLS=http://+:8080;
 
+secretGenerator:
+- name: apiservice-secrets
+  envs:
+  - .apiservice.secrets

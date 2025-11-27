@@ -4,6 +4,7 @@
   "containerImageTags": [
     "latest"
   ],
+  "imagePullPolicy": "Always",
   "containerBuilder": "docker",
   "outputFormat": "kustomize",
   "skipFinalKustomizeGeneration": false,
@@ -11,23 +12,25 @@
   "includeDashboard": true,
   "useCustomNamespace": false,
   "secrets": {
-    "salt": "BooUTD5LYJgNU9/z",
-    "hash": "yjf9sufsqxE5xHpBcRxZETP1coGjIIzaD3pkwyMe324=",
+    "salt": "MT4jD4kDCaZnkXJJ",
+    "hash": "V19SI9owoEZfYRgI1CYPOW0kHj8WT23oH9Jldqebd70=",
     "secrets": {
       "cache-password": {
-        "value": "BooUTD5LYJgNU9/ziAYWtgMvb1QOGmMERaU\u002BhG4CHHohNHWHCSXhaDH7lBH/ErPRrw8="
+        "value": "MT4jD4kDCaZnkXJJE/0Pexl9GZQ14HYHWJ3cwYszOaq80ws08\u002B0aoF392YQqCzBcKhI="
       },
-      "sql-password": {
-        "value": "BooUTD5LYJgNU9/zWYLi3ZhQ5dcvLFc0EwLXjTUEGn89BFORECfsQir4mkXZIYWLqgc="
+      "password": {
+        "value": "MT4jD4kDCaZnkXJJWvDCBR8pafCRmvVRX//cONVeM6mW1AlVs7s="
       },
       "cache": {},
       "sql": {
-        "MSSQL_SA_PASSWORD": "BooUTD5LYJgNU9/zWYLi3ZhQ5dcvLFc0EwLXjTUEGn89BFORECfsQir4mkXZIYWLqgc="
+        "MSSQL_SA_PASSWORD": "MT4jD4kDCaZnkXJJWvDCBR8pafCRmvVRX//cONVeM6mW1AlVs7s="
       },
       "ecsdb": {},
-      "apiservice": {},
+      "apiservice": {
+        "ConnectionStrings__ecsdb": "MT4jD4kDCaZnkXJJguZroLfzsSuWuBRyYXyCnbMPBbqf0lUS9/Z68z2hhvYTDyxGXmnW/t54HhhCcWKwZJYJ9WP9tVZyezgnO41AvkGyg1XLPicZUxIL5n6r39yftrKyjxPFaIHanimgnpP4Pd5\u002BotJhdnk\u002BYYZREL4TrQ=="
+      },
       "webfrontend": {
-        "ConnectionStrings__cache": "BooUTD5LYJgNU9/zdp1Z6AEqHZzdDJroYDXh1DsxN0QOdAD2UFGLQgPKrwPUEJDVz2VSoYusFPItmV\u002BMMQ0LRuXEL2\u002BSBg=="
+        "ConnectionStrings__cache": "MT4jD4kDCaZnkXJJlVlkez7M0ycmoJSPLvcm7IMLFKSfml5SsaN6smjhxropDi0JFXncpetqRh1WdV2lX4sBgTq\u002BiFtKPQ=="
       }
     }
   },
