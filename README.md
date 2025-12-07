@@ -52,16 +52,9 @@ This tool emerged from countless experiments, trial and error, and real-world de
 - **.NET Aspire** application with AppHost project
 - **Aspirate** tool: `dotnet tool install -g aspirate`
 
-### Deployment Server (Target - Currently Linux, Windows Coming Soon)
+### Deployment Server (Target - Currently Linux, Windows)
 - **Ubuntu 20.04+**, **Debian 11+**, **Fedora 37+**, or **Rocky Linux 8+**
 - **Root or sudo access**
-- **Internet connection** (for initial setup)
-
-### Supported Migration Paths
-- ✅ **Windows → Linux** (Generate on Windows, deploy on Linux)
-- ✅ **Linux → Linux** (Generate and deploy on same or different Linux machines)
-- ✅ **Windows → Windows** (Coming soon - Windows Server deployment)
-- ✅ **Linux → Windows** (Coming soon - Windows Server deployment)
 
 ---
 
@@ -229,7 +222,7 @@ The `init` command installs:
 - ✅ **k9s** - Terminal UI for Kubernetes
 - ✅ **Kubernetes Dashboard** - Web-based UI
 - ✅ **firewalld** - Firewall with Kubernetes ports configured
-- ✅ **jq** - JSON processor for manifest parsing
+- ✅ **jq** - JSON processor
 - ✅ **Python3 + cryptography** - For secret decryption
 - ✅ **Docker** (Minikube only) - Container runtime
 
@@ -1399,7 +1392,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 <div align="center">
 
 **Made with ❤️ by developers, for developers**
-
-*No PhD in K8sology required!*
 
 </div>
