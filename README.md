@@ -12,13 +12,21 @@ A command-line tool that simplifies the deployment of .NET Aspire applications t
 
 ## 📖 Background
 
-This project began as a personal journey from software development into the DevOps world—a quest to understand how Kubernetes really works in action with .NET projects. While [Aspirate](https://github.com/prom3theu5/aspirate) does an excellent job automating the generation and application of Kubernetes manifests from .NET Aspire orchestration, it was missing one crucial piece: **migration**.
+This project began as a personal journey from software development into the DevOps world—a quest to understand how Kubernetes really works in action with .NET projects. While [Aspirate](https://github.com/prom3theu5/aspirate) does an excellent job generating Kubernetes manifests from .NET Aspire orchestration, it was missing one crucial piece: **migration packaging**.
 
-**The Problem:** You develop on one machine, but need to continuously deploy to another—whether that's Windows to Linux, Linux to Linux, or even Windows to Windows. How do you package everything and migrate it efficiently?
+**The Problem:** Aspirate generates perfect Kubernetes manifests, but you still need to manually handle Docker images, secrets, transfer files, and set up the target environment. When you need to continuously deploy from one machine to another—whether that's Windows to Linux, Linux to Linux, or even Windows to Windows—the manual steps become tedious and error-prone.
 
 **The Solution:** aspire2kube - a cross-platform tool designed to reduce the headache for developers who want to leverage Kubernetes without needing a PhD in "K8sology"! 
 
-This tool emerged from countless experiments, trial and error, and real-world deployment challenges. It automates the entire workflow from Aspire generation to Kubernetes deployment, handling image packaging, secret management, and cluster initialization—**on both Windows and Linux platforms**.
+aspire2kube automates everything that comes **after** Aspirate:
+- ✅ **Packages** Aspirate manifests into a migration bundle
+- ✅ **Handles** Docker images (tar export or Docker Hub push)
+- ✅ **Transfers** files to target server (SCP or croc P2P)
+- ✅ **Initializes** Kubernetes on target (k3s or Minikube)
+- ✅ **Deploys** with automatic secret decryption
+- ✅ **Manages** cleanup and resource removal
+
+This tool emerged from countless experiments, trial and error, and real-world deployment challenges—making Kubernetes migration as simple as running a few commands on **both Windows and Linux platforms**.
 
 ---
 
@@ -59,41 +67,66 @@ This tool emerged from countless experiments, trial and error, and real-world de
 
 ## 🚀 Quick Start
 
-### Step 1: Install aspire2kube
+### Step 1: Install Tools
 
 ```bash
-# Install globally
-dotnet tool install -g aspire2kube
+# Install Aspirate (generates Kubernetes manifests from Aspire)
+dotnet tool install -g aspirate
 
-# Or install locally
-dotnet tool install aspire2kube
+# Install aspire2kube (packages everything for migration)
+dotnet tool install -g aspire2kube
 ```
 
-### Step 2: Generate Aspire Manifests
+### Step 2: Generate Kubernetes Manifests with Aspirate
 
 ```bash
 # Navigate to your Aspire AppHost project
 cd MyAspireApp.AppHost
 
-# Generate Kubernetes manifests using Aspirate
+# Aspirate generates all Kubernetes manifests from your Aspire orchestration
 aspirate generate --container-registry docker.io --image-pull-policy IfNotPresent
 
-# This creates an 'aspirate-output' folder with all manifests
+# This creates an 'aspirate-output' folder with deployment manifests
 ```
 
-### Step 3: Build Migration Package
+### Step 3: Package Migration Bundle with aspire2kube
 
 ```bash
-# Generate migration package with tar export (for offline deployment)
+# aspire2kube packages manifests + images into a migration-ready bundle
+
+# Option 1: Package with tar images (offline deployment - images in zip)
 aspire2kube generate --export-method tar --aspirate-output ./aspirate-output
 
-# Or push images to Docker Hub (for online deployment)
+# Option 2: Push images to Docker Hub (online deployment - smaller zip)
 aspire2kube generate --export-method push --docker-username yourusername
 
-# This creates an 'Aspire-Migration' folder ready to transfer
+# Option 3: Skip image handling (manifests only)
+aspire2kube generate --export-method skip --aspirate-output ./aspirate-output
+
+# This creates 'Aspire-Migration.zip' containing:
+#   - manifests/ (from Aspirate output)
+#   - *.tar files (if using tar method)
+#   - deployment scripts
+#   - secret decryption scripts
 ```
 
-### Step 4: Setup Kubernetes on Target Server
+### Step 4: Transfer Migration Bundle to Target Server
+
+```bash
+# Option 1: Using SCP (SSH - traditional method)
+scp Aspire-Migration.zip user@target-server:/home/user/
+
+# Option 2: Using croc (easy P2P transfer, no SSH needed)
+# Install croc: https://github.com/schollz/croc
+croc send Aspire-Migration.zip
+# On target server: croc [code-shown-by-sender]
+
+# Extract on target server
+unzip Aspire-Migration.zip
+cd Aspire-Migration
+```
+
+### Step 5: Setup Kubernetes on Target Server
 
 ```bash
 # On your target Linux server (SSH or local)
@@ -104,18 +137,15 @@ aspire2kube init
 aspire2kube init --distro ubuntu --k8s-type k3s
 ```
 
-### Step 5: Deploy Application
+### Step 6: Deploy Application
 
 ```bash
-# Transfer migration folder to target server (if remote)
-scp -r Aspire-Migration/ user@target-server:/home/user/
-
-# On target server: Deploy
+# From the extracted Aspire-Migration folder
 cd Aspire-Migration
 aspire2kube deploy
 ```
 
-### Step 6: Verify Deployment
+### Step 7: Verify Deployment
 
 ```bash
 # Check running pods
@@ -231,7 +261,7 @@ After installation, you may need to:
 
 ### `aspire2kube generate`
 
-Generate Kubernetes migration package from Aspirate output. This command runs on Windows and creates a deployment-ready package.
+Package Kubernetes migration bundle from Aspirate output. This command takes the manifests generated by Aspirate and packages them along with Docker images into a ready-to-deploy bundle (zip file). **Note:** Aspirate must be run first to generate the Kubernetes manifests - this command packages them for migration.
 
 #### Options
 
@@ -245,10 +275,11 @@ Generate Kubernetes migration package from Aspirate output. This command runs on
 #### Export Methods
 
 **1. `tar` - Offline Deployment** (Recommended for most users)
-- Exports all images as .tar files
+- Exports all Docker images as .tar files **included in the zip**
 - No internet required on deployment server
 - Best for air-gapped or restricted networks
-- Larger transfer size
+- Larger zip file size (includes images)
+- Images are automatically imported during deployment
 
 ```bash
 aspire2kube generate --export-method tar
@@ -256,17 +287,19 @@ aspire2kube generate --export-method tar
 
 **2. `push` - Docker Hub Deployment**
 - Pushes images to Docker Hub
-- Smaller transfer size (only manifests)
+- **Smaller zip file** (only manifests, no images)
 - Requires Docker Hub account
-- Requires internet on deployment server
+- Requires internet on deployment server to pull images
+- Faster transfer, images pulled during deployment
 
 ```bash
 aspire2kube generate --export-method push --docker-username myusername
 ```
 
 **3. `skip` - Manual Image Management**
-- Skip image export entirely
-- Use if images are already available
+- Skip image export/push entirely
+- **Smallest zip file** (manifests only)
+- Use if images are already available on target
 - Advanced users only
 
 ```bash
@@ -275,24 +308,51 @@ aspire2kube generate --export-method skip
 
 #### Output Structure
 
-The command creates an `Aspire-Migration` folder:
+The command creates `Aspire-Migration.zip` containing:
 
 ```
-Aspire-Migration/
-├── manifests/
-│   ├── my-api/
-│   │   ├── deployment.yaml
-│   │   ├── service.yaml
-│   │   ├── kustomization.yaml
-│   │   └── .my-api.secrets (auto-generated)
-│   ├── my-web/
-│   │   └── ...
-│   └── sql-server/
-│       └── ...
-├── *.tar (if export-method=tar)
-├── aspirate-state.json
-├── deploy2k3s.sh (or deploy2minikube.sh)
-└── decrypt-secrets.py
+Aspire-Migration.zip
+└── Aspire-Migration/
+    ├── manifests/                    (copied from aspirate-output)
+    │   ├── my-api/
+    │   │   ├── deployment.yaml
+    │   │   ├── service.yaml
+    │   │   ├── kustomization.yaml
+    │   │   └── .my-api.secrets       (auto-generated during deploy)
+    │   ├── my-web/
+    │   │   └── ...
+    │   └── sql-server/
+    │       └── ...
+    ├── *.tar                         (only if export-method=tar)
+    ├── aspirate-state.json           (from aspirate-output)
+    ├── deploy2k3s.sh                 (deployment script)
+    ├── deploy2minikube.sh            (deployment script)
+    └── decrypt-secrets.py            (secret decryption utility)
+```
+
+#### Transfer Options
+
+The script can automatically transfer the zip to your target server:
+
+**Option 1: SCP (SSH Transfer)**
+```bash
+# Requires SSH access to target server
+# Script prompts for server details
+# Uses secure SCP protocol
+```
+
+**Option 2: croc (P2P Transfer)**
+```bash
+# No SSH needed - uses relay servers
+# Easy code-based pairing
+# Works through firewalls
+# Learn more: https://github.com/schollz/croc
+```
+
+**Option 3: Manual Transfer**
+```bash
+# Transfer Aspire-Migration.zip yourself
+# Any method: USB, file share, cloud storage, etc.
 ```
 
 #### Examples
@@ -523,42 +583,51 @@ cd MyAspireApp
 dotnet build
 dotnet run --project MyAspireApp.AppHost
 
-# 3. Install Aspirate
+# 3. Install required tools
 dotnet tool install -g aspirate
+dotnet tool install -g aspire2kube
 
-# 4. Generate Kubernetes manifests
+# 4. Generate Kubernetes manifests with Aspirate
 cd MyAspireApp.AppHost
 aspirate generate --container-registry docker.io
 
-# 5. Install aspire2kube
-dotnet tool install -g aspire2kube
-
-# 6. Create migration package
+# 5. Package everything into migration bundle
 aspire2kube generate --export-method tar --aspirate-output ./aspirate-output
+# This creates Aspire-Migration.zip with manifests, tar images, and scripts
 
-# 7. Transfer to target server (if different machine)
-scp -r Aspire-Migration/ user@target-server:/home/user/
+# 6. Transfer to target server
+
+# Option A: Using SCP (SSH)
+scp Aspire-Migration.zip user@target-server:/home/user/
+
+# Option B: Using croc (P2P, no SSH needed)
+croc send Aspire-Migration.zip
+# On target server: croc [code-shown-here]
+
+# Option C: Manual transfer
+# Copy Aspire-Migration.zip using any method you prefer
 ```
 
 ### On Your Target Linux Server (or same machine)
 
 ```bash
-# 1. Install aspire2kube (if not already installed)
+# 1. Extract the migration bundle
+unzip Aspire-Migration.zip
+cd Aspire-Migration
+
+# 2. Install aspire2kube (if not already installed)
 dotnet tool install -g aspire2kube
 
-# 2. Initialize Kubernetes environment
+# 3. Initialize Kubernetes environment
 aspire2kube init
 
-# 3. Restart terminal or reload
+# 4. Restart terminal or reload
 source ~/.bashrc
 
-# 4. Verify Kubernetes is running
+# 5. Verify Kubernetes is running
 kubectl get nodes
 
-# 5. Navigate to migration folder
-cd ~/Aspire-Migration
-
-# 6. Deploy application
+# 6. Deploy application (from Aspire-Migration folder)
 aspire2kube deploy
 
 # 7. Check deployment status
@@ -576,12 +645,17 @@ k9s
 ### Updating Your Application
 
 ```bash
-# On development machine: Re-generate and transfer
+# On development machine: Re-generate bundle
+cd MyAspireApp.AppHost
+aspirate generate --container-registry docker.io
 aspire2kube generate --export-method tar
-scp -r Aspire-Migration/ user@target-server:/home/user/
 
-# On target server: Re-deploy
-cd ~/Aspire-Migration
+# Transfer Aspire-Migration.zip to server (SCP, croc, or manual)
+scp Aspire-Migration.zip user@target-server:/home/user/
+
+# On target server: Extract and re-deploy
+unzip -o Aspire-Migration.zip
+cd Aspire-Migration
 aspire2kube deploy
 ```
 
@@ -657,6 +731,79 @@ sudo /usr/local/bin/k3s-uninstall.sh
 - Using Docker Hub workflow
 - Need frequent updates
 - Size of transfer matters
+
+### Transfer Methods
+
+aspire2kube supports two methods for transferring the migration bundle to your target server:
+
+#### SCP (SSH Copy Protocol)
+
+**How it works:**
+- Traditional SSH-based file transfer
+- Requires SSH access to target server
+- Built into all Linux/macOS, available on Windows
+
+**Pros:**
+- ✅ Standard, well-known protocol
+- ✅ Secure encryption
+- ✅ Works on any server with SSH
+- ✅ No additional tools needed
+
+**Cons:**
+- ❌ Requires SSH setup
+- ❌ Need server credentials
+- ❌ May require port forwarding
+
+**Use When:**
+- You have SSH access
+- Deploying to servers
+- Standard enterprise environment
+
+**Example:**
+```bash
+scp Aspire-Migration.zip user@server-ip:/home/user/
+```
+
+#### croc (P2P File Transfer)
+
+**How it works:**
+- Peer-to-peer file transfer using relay servers
+- No SSH needed - just a code phrase
+- Works through firewalls and NAT
+
+**Pros:**
+- ✅ No SSH setup required
+- ✅ Works through firewalls
+- ✅ Simple code-based pairing
+- ✅ End-to-end encrypted
+- ✅ Cross-platform (Windows/Linux/macOS)
+
+**Cons:**
+- ❌ Requires croc installed on both sides
+- ❌ Relies on relay servers
+- ❌ May be slower than direct SCP
+
+**Use When:**
+- No SSH access available
+- Quick transfers between machines
+- Working through restrictive firewalls
+- Transferring to developer workstations
+
+**Example:**
+```bash
+# On source machine
+croc send Aspire-Migration.zip
+# Shows code like: "code is: 8765-tennis-table-quick"
+
+# On target machine
+croc 8765-tennis-table-quick
+# Receives the file
+```
+
+**Installation:**
+- Linux: `curl https://getcroc.schollz.com | bash`
+- Windows: `scoop install croc` or download from [GitHub](https://github.com/schollz/croc/releases)
+- More info: https://github.com/schollz/croc
 
 ---
 
@@ -1252,5 +1399,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 <div align="center">
 
 **Made with ❤️ by developers, for developers**
+
+*No PhD in K8sology required!*
 
 </div>
