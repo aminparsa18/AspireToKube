@@ -14,18 +14,19 @@ A command-line tool that simplifies the deployment of .NET Aspire applications t
 
 This project began as a personal journey from software development into the DevOps world—a quest to understand how Kubernetes really works in action with .NET projects. While [Aspirate](https://github.com/prom3theu5/aspirate) does an excellent job automating the generation and application of Kubernetes manifests from .NET Aspire orchestration, it was missing one crucial piece: **migration**.
 
-**The Problem:** You develop on your Windows PC, but need to continuously deploy to your Linux server. How do you bridge that gap efficiently?
+**The Problem:** You develop on one machine, but need to continuously deploy to another—whether that's Windows to Linux, Linux to Linux, or even Windows to Windows. How do you package everything and migrate it efficiently?
 
-**The Solution:** aspire2kube - a tool designed to reduce the headache for developers who want to leverage Kubernetes without needing a PhD in "K8sology"! 
+**The Solution:** aspire2kube - a cross-platform tool designed to reduce the headache for developers who want to leverage Kubernetes without needing a PhD in "K8sology"! 
 
-This tool emerged from countless experiments, trial and error, and real-world deployment challenges. It automates the entire workflow from Aspire generation to Kubernetes deployment, handling image packaging, secret management, and cluster initialization.
+This tool emerged from countless experiments, trial and error, and real-world deployment challenges. It automates the entire workflow from Aspire generation to Kubernetes deployment, handling image packaging, secret management, and cluster initialization—**on both Windows and Linux platforms**.
 
 ---
 
 ## ✨ Features
 
 - 🚀 **One-Command Kubernetes Setup** - Install k3s or Minikube with all dependencies
-- 🔄 **Windows to Linux Migration** - Generate on Windows, deploy on Linux seamlessly
+- 🔄 **Cross-Platform Migration** - Package on any platform, deploy anywhere
+- 🪟🐧 **Windows & Linux Support** - Full support for both operating systems
 - 📦 **Flexible Image Export** - Choose between Docker Hub push or offline tar files
 - 🔐 **Automatic Secret Management** - Decrypt and apply Aspire secrets automatically
 - 🎯 **Interactive Cleanup** - Selectively remove resources when you're done
@@ -37,16 +38,22 @@ This tool emerged from countless experiments, trial and error, and real-world de
 
 ## 📋 Prerequisites
 
-### Development Machine (Windows/Linux)
+### Development Machine (Source - Windows or Linux)
 - **.NET 8.0 SDK** or later
 - **Docker Desktop** (Windows) or Docker (Linux)
 - **.NET Aspire** application with AppHost project
 - **Aspirate** tool: `dotnet tool install -g aspirate`
 
-### Deployment Server (Linux)
+### Deployment Server (Target - Currently Linux, Windows Coming Soon)
 - **Ubuntu 20.04+**, **Debian 11+**, **Fedora 37+**, or **Rocky Linux 8+**
 - **Root or sudo access**
 - **Internet connection** (for initial setup)
+
+### Supported Migration Paths
+- ✅ **Windows → Linux** (Generate on Windows, deploy on Linux)
+- ✅ **Linux → Linux** (Generate and deploy on same or different Linux machines)
+- ✅ **Windows → Windows** (Coming soon - Windows Server deployment)
+- ✅ **Linux → Windows** (Coming soon - Windows Server deployment)
 
 ---
 
@@ -86,12 +93,10 @@ aspire2kube generate --export-method push --docker-username yourusername
 # This creates an 'Aspire-Migration' folder ready to transfer
 ```
 
-### Step 4: Setup Kubernetes on Server
+### Step 4: Setup Kubernetes on Target Server
 
 ```bash
-# SSH to your Linux server
-ssh user@your-server
-
+# On your target Linux server (SSH or local)
 # Initialize Kubernetes (auto-detects distribution)
 aspire2kube init
 
@@ -102,10 +107,10 @@ aspire2kube init --distro ubuntu --k8s-type k3s
 ### Step 5: Deploy Application
 
 ```bash
-# Transfer migration folder to server
-scp -r Aspire-Migration/ user@your-server:/home/user/
+# Transfer migration folder to target server (if remote)
+scp -r Aspire-Migration/ user@target-server:/home/user/
 
-# SSH to server and deploy
+# On target server: Deploy
 cd Aspire-Migration
 aspire2kube deploy
 ```
@@ -124,7 +129,7 @@ k9s
 
 # Access Kubernetes Dashboard
 cat ~/k8s-dashboard-token.txt
-# Open: https://your-server-ip:30443
+# Open: https://target-server-ip:30443
 ```
 
 ---
@@ -507,7 +512,7 @@ Deleting orphaned Pods...
 
 Here's a complete end-to-end example of deploying an Aspire application:
 
-### On Your Windows Development Machine
+### On Your Development Machine (Windows or Linux)
 
 ```powershell
 # 1. Create your .NET Aspire application
@@ -531,14 +536,14 @@ dotnet tool install -g aspire2kube
 # 6. Create migration package
 aspire2kube generate --export-method tar --aspirate-output ./aspirate-output
 
-# 7. Transfer to Linux server
-scp -r Aspire-Migration/ user@192.168.1.100:/home/user/
+# 7. Transfer to target server (if different machine)
+scp -r Aspire-Migration/ user@target-server:/home/user/
 ```
 
-### On Your Linux Server
+### On Your Target Linux Server (or same machine)
 
 ```bash
-# 1. Install aspire2kube
+# 1. Install aspire2kube (if not already installed)
 dotnet tool install -g aspire2kube
 
 # 2. Initialize Kubernetes environment
@@ -562,7 +567,7 @@ kubectl get services
 
 # 8. Access Kubernetes Dashboard
 cat ~/k8s-dashboard-token.txt
-# Open: https://192.168.1.100:30443
+# Open: https://localhost:30443 or https://server-ip:30443
 
 # 9. Use k9s for interactive management
 k9s
@@ -571,11 +576,11 @@ k9s
 ### Updating Your Application
 
 ```bash
-# On Windows: Re-generate and transfer
+# On development machine: Re-generate and transfer
 aspire2kube generate --export-method tar
-scp -r Aspire-Migration/ user@192.168.1.100:/home/user/
+scp -r Aspire-Migration/ user@target-server:/home/user/
 
-# On Linux: Re-deploy
+# On target server: Re-deploy
 cd ~/Aspire-Migration
 aspire2kube deploy
 ```
@@ -583,11 +588,11 @@ aspire2kube deploy
 ### Cleanup
 
 ```bash
-# On Linux: Remove deployed resources
+# On target server: Remove deployed resources
 aspire2kube destroy
 # Select Mode 1 for complete cleanup
 
-# Optional: Uninstall Kubernetes
+# Optional: Uninstall Kubernetes (Linux only)
 sudo /usr/local/bin/k3s-uninstall.sh
 ```
 
@@ -1247,7 +1252,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 <div align="center">
 
 **Made with ❤️ by developers, for developers**
-
-*No PhD in K8sology required!*
 
 </div>
