@@ -1,8 +1,8 @@
 ﻿# Aspire2Kube
 
-> **From .NET Aspire to Kubernetes - Without a PhD in K8sology**
+> **A simple starter pack for migrating .NET Aspire apps to Kubernetes**
 
-A command-line tool that simplifies the deployment of .NET Aspire applications to Kubernetes clusters, bridging the gap between Windows development and Linux server deployment.
+A command-line tool that helps you package and deploy .NET Aspire applications to Kubernetes clusters. No PhD in K8sology required!
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg)](https://dotnet.microsoft.com/download)
@@ -12,35 +12,32 @@ A command-line tool that simplifies the deployment of .NET Aspire applications t
 
 ## 📖 Background
 
-This project began as a personal journey from software development into the DevOps world—a quest to understand how Kubernetes really works in action with .NET projects. While [Aspirate](https://github.com/prom3theu5/aspirate) does an excellent job generating Kubernetes manifests from .NET Aspire orchestration, it was missing one crucial piece: **migration packaging**.
+At the beginning, this was a personal journey as a software developer into the DevOps world—trying to see how Kubernetes really works in action with .NET projects. [Aspirate](https://github.com/prom3theu5/aspirate) does a great job generating Kubernetes manifests from .NET Aspire orchestration, but I found myself needing one more thing: **migration**.
 
-**The Problem:** Aspirate generates perfect Kubernetes manifests, but you still need to manually handle Docker images, secrets, transfer files, and set up the target environment. When you need to continuously deploy from one machine to another—whether that's Windows to Linux, Linux to Linux, or even Windows to Windows—the manual steps become tedious and error-prone.
+What if I develop on my personal Windows PC and need to continuously deploy to my Linux server? Or maybe you develop on Linux and deploy to another Linux machine? The manifests are ready, the images are built, but how do you package everything up and move it efficiently?
 
-**The Solution:** aspire2kube - a cross-platform tool designed to reduce the headache for developers who want to leverage Kubernetes without needing a PhD in "K8sology"! 
+All my experiments along this path led to this command-line tool—a simple starter pack to reduce the headache for developers without a PhD in K8sology! 
 
-aspire2kube automates everything that comes **after** Aspirate:
-- ✅ **Packages** Aspirate manifests into a migration bundle
-- ✅ **Handles** Docker images (tar export or Docker Hub push)
-- ✅ **Transfers** files to target server (SCP or croc P2P)
-- ✅ **Initializes** Kubernetes on target (k3s or Minikube)
-- ✅ **Deploys** with automatic secret decryption
-- ✅ **Manages** cleanup and resource removal
+**What it does:**
+- 📦 Packages your Aspirate manifests and Docker images into a zip file
+- 🚀 Transfers the bundle to your target server (SCP or croc)
+- ⚙️ Sets up Kubernetes on your server (k3s or Minikube)
+- 🔐 Handles secret decryption automatically
+- 🧹 Cleans up resources when you're done
 
-This tool emerged from countless experiments, trial and error, and real-world deployment challenges—making Kubernetes migration as simple as running a few commands on **both Windows and Linux platforms**.
+It's not trying to be Terraform or Jenkins—just a basic tool to help you migrate your Aspire apps to Kubernetes with minimal friction. It has a long path to go, but it gets the job done for the common case.
 
 ---
 
 ## ✨ Features
 
-- 🚀 **One-Command Kubernetes Setup** - Install k3s or Minikube with all dependencies
-- 🔄 **Cross-Platform Migration** - Package on any platform, deploy anywhere
-- 🪟🐧 **Windows & Linux Support** - Full support for both operating systems
-- 📦 **Flexible Image Export** - Choose between Docker Hub push or offline tar files
-- 🔐 **Automatic Secret Management** - Decrypt and apply Aspire secrets automatically
-- 🎯 **Interactive Cleanup** - Selectively remove resources when you're done
-- 🐧 **Multi-Distribution Support** - Works on Ubuntu, Debian, Fedora, Rocky Linux, RHEL
-- 🎮 **k3s or Minikube** - Choose your Kubernetes flavor
-- 📊 **Built-in Monitoring** - Includes k9s and Kubernetes Dashboard
+- 📦 **Package & Go** - Bundle manifests and images into a single zip file
+- 🚀 **Easy Transfer** - SCP or croc (P2P) to get files to your server
+- ⚙️ **Quick Setup** - One command to install k3s or Minikube
+- 🔐 **Secret Handling** - Automatic decryption of Aspirate secrets
+- 🧹 **Clean Cleanup** - Interactive resource removal
+- 🪟🐧 **Cross-Platform** - Works on Windows and Linux
+- 🐧 **Multi-Distro** - Ubuntu, Debian, Fedora, Rocky Linux, RHEL support
 
 ---
 
@@ -55,7 +52,6 @@ This tool emerged from countless experiments, trial and error, and real-world de
 ### Deployment Server (Target - Currently Linux, Windows)
 - **Ubuntu 20.04+**, **Debian 11+**, **Fedora 37+**, or **Rocky Linux 8+**
 - **Root or sudo access**
-
 ---
 
 ## 🚀 Quick Start
