@@ -4,11 +4,11 @@ using System.Runtime.InteropServices;
 
 namespace AspireToKube.Cli.Commands;
 
-internal static class CleanupCommand
+internal static class DestroyCommand
 {
     public static Command Create()
     {
-        var cmd = new Command("cleanup", "Cleanup K8S resources");
+        var cmd = new Command("destroy", "Cleanup K8S resources");
 
         var distroOption = new Option<string>("--target", "-t")
         {
@@ -47,8 +47,8 @@ internal static class CleanupCommand
 
                 // Select script based on distribution
                 var scriptName = target == "k3s"
-                    ? "cleanup-k3s.sh"
-                    : "cleanup-minikube.sh";
+                    ? "destroy-k3s.sh"
+                    : "destroy-minikube.sh";
 
                 scriptPath = Path.Combine(baseDir, "scripts", "Linux", scriptName);
                 scriptRunner = bashPath;

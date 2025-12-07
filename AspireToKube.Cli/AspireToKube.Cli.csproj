@@ -12,7 +12,7 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<PackageId>Aspire2Kube.Cli</PackageId>
-		<Version>0.1.22</Version>
+		<Version>0.1.30</Version>
 		<Authors>Amin Parsa</Authors>
 		<Description>Friendly CLI to package Aspire projects and deploy to Kubernetes.</Description>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -37,6 +37,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="..\README.md" Pack="true" PackagePath="\"/>
+		<None Include="..\README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="nupkg\" />
 	</ItemGroup>
 </Project>

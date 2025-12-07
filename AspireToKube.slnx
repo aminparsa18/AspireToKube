@@ -1,8 +1,10 @@
 <Solution>
-  <Project Path="AspireToKube.ApiService/AspireToKube.ApiService.csproj" />
-  <Project Path="AspireToKube.AppHost/AspireToKube.AppHost.csproj" />
+  <Folder Name="/Sample/">
+    <Project Path="AspireToKube.ApiService/AspireToKube.ApiService.csproj" />
+    <Project Path="AspireToKube.AppHost/AspireToKube.AppHost.csproj" />
+    <Project Path="AspireToKube.ServiceDefaults/AspireToKube.ServiceDefaults.csproj" />
+    <Project Path="AspireToKube.Web/AspireToKube.Web.csproj" />
+  </Folder>
   <Project Path="AspireToKube.Cli/AspireToKube.Cli.csproj" Id="45ab82ba-923f-43e0-98a5-2a5264765dda" />
-  <Project Path="AspireToKube.ServiceDefaults/AspireToKube.ServiceDefaults.csproj" />
   <Project Path="AspireToKube.Tests/AspireToKube.Tests.csproj" />
-  <Project Path="AspireToKube.Web/AspireToKube.Web.csproj" />
 </Solution>

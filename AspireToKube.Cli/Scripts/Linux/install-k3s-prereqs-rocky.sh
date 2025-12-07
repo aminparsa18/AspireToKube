@@ -1,7 +1,7 @@
 ﻿#!/bin/bash
 
-# Prerequisites Installation Script for Ubuntu
-# Installation Order: Update System -> firewalld -> k3s -> k9s -> Dashboard -> Lens -> jq -> Python3/cryptography
+# Prerequisites Installation Script for Rocky Linux / RHEL - k3s Edition
+# Installation: Update System -> firewalld -> k3s -> k9s -> Dashboard -> Lens -> jq -> Python3/cryptography
 
 set -e
 
@@ -14,7 +14,8 @@ GRAY='\033[0;37m'
 NC='\033[0m'
 
 echo "================================================"
-echo "  Installing Kubernetes Prerequisites"
+echo "  Installing Kubernetes Prerequisites (k3s)"
+echo "  Rocky Linux / RHEL Edition"
 echo "================================================"
 echo ""
 
@@ -24,10 +25,21 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Detect OS
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS_NAME=$NAME
+    OS_VERSION=$VERSION_ID
+    echo -e "${CYAN}Detected OS: $OS_NAME $OS_VERSION${NC}"
+    echo ""
+else
+    echo -e "${YELLOW}Warning: Could not detect OS version${NC}"
+    echo ""
+fi
+
 # [1/8] Update system
 echo -e "${YELLOW}[1/8] Updating system...${NC}"
-apt-get update -y
-apt-get upgrade -y
+dnf update -y
 echo -e "${GREEN}System updated${NC}"
 echo ""
 
@@ -38,7 +50,7 @@ if command -v firewall-cmd &> /dev/null; then
     firewall-cmd --version 2>/dev/null || true
 else
     echo -e "${CYAN}Installing firewalld...${NC}"
-    apt-get install -y firewalld
+    dnf install -y firewalld
     
     # Start and enable firewalld
     systemctl start firewalld
@@ -56,7 +68,9 @@ if command -v k3s &> /dev/null; then
     k3s --version
 else
     echo -e "${CYAN}Installing k3s...${NC}"
-    curl -sfL https://get.k3s.io | sh -
+    
+    # Install k3s with SELinux support
+    curl -sfL https://get.k3s.io | sh -s - --selinux
     
     # Wait for k3s to be ready
     echo -e "${CYAN}Waiting for k3s to be ready...${NC}"
@@ -310,7 +324,7 @@ echo -e "${YELLOW}[7/8] Installing jq (JSON processor)...${NC}"
 if command -v jq &> /dev/null; then
     echo -e "${GREEN}jq already installed: $(jq --version)${NC}"
 else
-    apt-get install -y jq
+    dnf install -y jq
     echo -e "${GREEN}jq installed successfully${NC}"
 fi
 echo ""
@@ -322,14 +336,14 @@ echo -e "${YELLOW}[8/8] Installing Python3 and cryptography library...${NC}"
 if command -v python3 &> /dev/null; then
     echo -e "${GREEN}Python3 already installed: $(python3 --version)${NC}"
 else
-    apt-get install -y python3 python3-pip python3-venv
+    dnf install -y python3 python3-pip
     echo -e "${GREEN}Python3 installed successfully${NC}"
 fi
 
 if command -v pip3 &> /dev/null; then
     echo -e "${GREEN}pip3 already installed: $(pip3 --version)${NC}"
 else
-    apt-get install -y python3-pip
+    dnf install -y python3-pip
     echo -e "${GREEN}pip3 installed successfully${NC}"
 fi
 
@@ -338,7 +352,8 @@ if python3 -c "import cryptography" 2>/dev/null; then
     echo -e "${GREEN}cryptography library already installed${NC}"
     python3 -c "import cryptography; print(f'Version: {cryptography.__version__}')"
 else
-    pip3 install --break-system-packages cryptography
+    # On RHEL/Rocky, we can use pip directly without --break-system-packages flag
+    pip3 install cryptography
     echo -e "${GREEN}cryptography library installed successfully${NC}"
 fi
 echo ""
@@ -456,6 +471,26 @@ fi
 
 echo ""
 echo "================================================"
+echo "  SELinux Status"
+echo "================================================"
+echo ""
+
+if command -v getenforce &> /dev/null; then
+    SELINUX_STATUS=$(getenforce)
+    echo -e "${CYAN}SELinux status: ${YELLOW}$SELINUX_STATUS${NC}"
+    
+    if [ "$SELINUX_STATUS" = "Enforcing" ]; then
+        echo -e "${GREEN}k3s was installed with SELinux support (--selinux flag)${NC}"
+        echo -e "${GRAY}If you encounter permission issues:${NC}"
+        echo -e "${GRAY}  - Check SELinux logs: ausearch -m avc -ts recent${NC}"
+        echo -e "${GRAY}  - Check k3s-selinux policy is installed: rpm -q k3s-selinux${NC}"
+    fi
+else
+    echo -e "${GRAY}SELinux tools not available${NC}"
+fi
+
+echo ""
+echo "================================================"
 echo "  Kubernetes Dashboard Access"
 echo "================================================"
 echo ""
@@ -556,5 +591,25 @@ echo -e "   ${CYAN}kubectl exec -it <sql-pod-name> -- /opt/mssql-tools/bin/sqlcm
 echo -e "   Or use port-forward: ${CYAN}kubectl port-forward svc/<sql-service> 1433:1433${NC}"
 echo ""
 
+echo -e "${YELLOW}9. Useful k3s commands:${NC}"
+echo -e "   ${CYAN}systemctl status k3s${NC}         - Check k3s service status"
+echo -e "   ${CYAN}systemctl restart k3s${NC}        - Restart k3s"
+echo -e "   ${CYAN}journalctl -u k3s${NC}            - View k3s logs"
+echo -e "   ${CYAN}/usr/local/bin/k3s-uninstall.sh${NC} - Uninstall k3s"
+echo ""
+
+echo -e "${YELLOW}10. SELinux troubleshooting (if needed):${NC}"
+echo -e "   ${CYAN}ausearch -m avc -ts recent${NC}    - Check SELinux denials"
+echo -e "   ${CYAN}rpm -q k3s-selinux${NC}            - Check k3s SELinux policy"
+echo -e "   ${CYAN}getenforce${NC}                    - Check SELinux mode"
+echo ""
+
 echo -e "${GREEN}Installation complete!${NC}"
 echo -e "${GREEN}Your Kubernetes environment is ready for Aspire deployments!${NC}"
+echo ""
+echo -e "${YELLOW}Rocky Linux / RHEL Specific Notes:${NC}"
+echo -e "  • k3s was installed with SELinux support (--selinux flag)"
+echo -e "  • SELinux is typically enabled - k3s-selinux policy installed automatically"
+echo -e "  • k3s runs as a systemd service: ${CYAN}systemctl status k3s${NC}"
+echo -e "  • Configuration: /etc/rancher/k3s/k3s.yaml"
+echo -e "  • To uninstall: /usr/local/bin/k3s-uninstall.sh"

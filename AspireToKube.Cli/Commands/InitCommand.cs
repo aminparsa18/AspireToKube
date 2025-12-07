@@ -12,40 +12,63 @@ internal static class InitCommand
 
         var distroOption = new Option<string>("--distro", "-d")
         {
-            Description = "Linux distribution (ubuntu, rocky, or auto-detect)"
+            Description = "Linux distribution (ubuntu, debian, fedora, rocky, rhel, or auto-detect)",
+            DefaultValueFactory = (x) => "auto"
+        };
+
+        var k8sTypeOption = new Option<string>("--k8s-type", "-k")
+        {
+            Description = "Kubernetes type (k3s or minikube)",
+            DefaultValueFactory = (x) => "k3s"
         };
 
         cmd.Options.Add(distroOption);
+        cmd.Options.Add(k8sTypeOption);
 
-        cmd.SetAction(distro =>
+        cmd.SetAction(parseResult =>
         {
             var baseDir = AppContext.BaseDirectory;
             string scriptRunner;
             string scriptArgs;
             string scriptPath;
 
+            // Get option values from parseResult
+            var distroValue = (parseResult.GetValue(distroOption) ?? "auto").Trim().ToLowerInvariant();
+            var k8sTypeValue = (parseResult.GetValue(k8sTypeOption) ?? "k3s").Trim().ToLowerInvariant();
+
+            // Validate k8s type
+            if (k8sTypeValue != "k3s" && k8sTypeValue != "minikube")
+            {
+                Console.Error.WriteLine($"Invalid --k8s-type value: {k8sTypeValue}");
+                Console.Error.WriteLine("Allowed values: k3s, minikube");
+                return 1;
+            }
+
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
                 // Detect or validate distribution
-                var detectedDistro = distro.GetValue(distroOption)!.Equals("auto", StringComparison.CurrentCultureIgnoreCase)
+                var detectedDistro = distroValue == "auto"
                     ? DetectLinuxDistro()
-                    : distro.GetValue(distroOption)?.ToLower();
+                    : NormalizeDistroName(distroValue);
 
                 if (detectedDistro == "unknown")
                 {
                     Console.Error.WriteLine("Could not detect Linux distribution. Please specify using --distro option.");
-                    Console.Error.WriteLine("Supported distributions: ubuntu, rocky");
+                    Console.Error.WriteLine("Supported distributions: ubuntu, debian, fedora, rocky, rhel");
                     return 1;
                 }
 
-                if (detectedDistro != "ubuntu" && detectedDistro != "rocky")
+                // Validate supported distributions
+                var supportedDistros = new[] { "ubuntu", "debian", "fedora", "rocky" };
+                if (!supportedDistros.Contains(detectedDistro))
                 {
                     Console.Error.WriteLine($"Unsupported distribution: {detectedDistro}");
-                    Console.Error.WriteLine("Supported distributions: ubuntu, rocky");
+                    Console.Error.WriteLine("Supported distributions: ubuntu, debian, fedora, rocky");
                     return 1;
                 }
 
                 Console.WriteLine($"Using distribution: {detectedDistro}");
+                Console.WriteLine($"Using Kubernetes type: {k8sTypeValue}");
 
                 // Pick a concrete bash path
                 var bashPath = File.Exists("/bin/bash")
@@ -54,10 +77,10 @@ internal static class InitCommand
                         ? "/usr/bin/bash"
                         : "bash"; // last fallback
 
-                // Select script based on distribution
-                var scriptName = detectedDistro == "ubuntu"
-                    ? "install-k8s-prereqs-ubuntu.sh"
-                    : "install-k8s-prereqs-rocky.sh";
+                // Select script based on distribution and k8s type
+                var scriptName = k8sTypeValue == "k3s"
+                    ? $"install-k3s-prereqs-{detectedDistro}.sh"
+                    : $"install-minikube-prereqs-{detectedDistro}.sh";
 
                 scriptPath = Path.Combine(baseDir, "scripts", "Linux", scriptName);
                 scriptRunner = bashPath;
@@ -65,12 +88,19 @@ internal static class InitCommand
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                if (distro.GetValue(distroOption)?.ToLower() != "auto" && distro.GetValue(distroOption)?.ToLower() != "windows")
+                if (distroValue != "auto" && distroValue != "windows")
                 {
-                    Console.WriteLine($"Note: --distro option ignored on Windows (specified: {distro})");
+                    Console.WriteLine($"Note: --distro option ignored on Windows (specified: {distroValue})");
                 }
 
-                scriptPath = Path.Combine(baseDir, "scripts", "Windows", "install-k8s-prerequisites.ps1");
+                Console.WriteLine($"Using Kubernetes type: {k8sTypeValue}");
+
+                // Windows script name based on k8s type
+                var scriptFileName = k8sTypeValue == "k3s"
+                    ? "install-k3s-prerequisites.ps1"
+                    : "install-minikube-prerequisites.ps1";
+
+                scriptPath = Path.Combine(baseDir, "scripts", "Windows", scriptFileName);
                 scriptRunner = "powershell";
                 scriptArgs = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\"";
             }
@@ -83,6 +113,7 @@ internal static class InitCommand
             if (!File.Exists(scriptPath))
             {
                 Console.Error.WriteLine($"Init script not found at: {scriptPath}");
+                Console.Error.WriteLine($"Expected location: {scriptPath}");
                 return 1;
             }
 
@@ -108,6 +139,22 @@ internal static class InitCommand
         return cmd;
     }
 
+    private static string NormalizeDistroName(string distro)
+    {
+        // Normalize common distribution name variations
+        return distro.ToLower() switch
+        {
+            "ubuntu" => "ubuntu",
+            "debian" => "debian",
+            "fedora" => "fedora",
+            "rocky" or "rocky linux" or "rockylinux" => "rocky",
+            "rhel" or "red hat" or "redhat" or "red hat enterprise linux" => "rocky", // RHEL uses Rocky scripts
+            "centos" or "centos stream" => "rocky", // CentOS uses Rocky scripts
+            "alma" or "almalinux" or "alma linux" => "rocky", // AlmaLinux uses Rocky scripts
+            _ => distro.ToLower()
+        };
+    }
+
     private static string DetectLinuxDistro()
     {
         try
@@ -117,24 +164,41 @@ internal static class InitCommand
             {
                 var osRelease = File.ReadAllText("/etc/os-release").ToLower();
 
+                // Ubuntu
                 if (osRelease.Contains("ubuntu"))
                     return "ubuntu";
 
+                // Debian
+                if (osRelease.Contains("debian"))
+                    return "debian";
+
+                // Fedora
+                if (osRelease.Contains("fedora"))
+                    return "fedora";
+
+                // Rocky Linux
                 if (osRelease.Contains("rocky") || osRelease.Contains("rocky linux"))
                     return "rocky";
 
-                // Also check for RHEL-based distributions that are compatible with Rocky
+                // RHEL-based distributions that are compatible with Rocky scripts
                 if (osRelease.Contains("red hat") || osRelease.Contains("rhel"))
-                    return "rocky";
-
-                if (osRelease.Contains("centos"))
-                    return "rocky";
-
-                // Debian can use Ubuntu script in most cases
-                if (osRelease.Contains("debian"))
                 {
-                    Console.WriteLine("Debian detected. Using Ubuntu script (should be compatible).");
-                    return "ubuntu";
+                    Console.WriteLine("RHEL detected. Using Rocky Linux scripts (compatible).");
+                    return "rocky";
+                }
+
+                // CentOS
+                if (osRelease.Contains("centos"))
+                {
+                    Console.WriteLine("CentOS detected. Using Rocky Linux scripts (compatible).");
+                    return "rocky";
+                }
+
+                // AlmaLinux
+                if (osRelease.Contains("almalinux") || osRelease.Contains("alma"))
+                {
+                    Console.WriteLine("AlmaLinux detected. Using Rocky Linux scripts (compatible).");
+                    return "rocky";
                 }
             }
 
@@ -144,19 +208,41 @@ internal static class InitCommand
                 var lsbRelease = File.ReadAllText("/etc/lsb-release").ToLower();
                 if (lsbRelease.Contains("ubuntu"))
                     return "ubuntu";
+                if (lsbRelease.Contains("debian"))
+                    return "debian";
             }
 
             if (File.Exists("/etc/redhat-release"))
             {
                 var redhatRelease = File.ReadAllText("/etc/redhat-release").ToLower();
+
                 if (redhatRelease.Contains("rocky"))
                     return "rocky";
 
-                // CentOS, RHEL, Fedora can use Rocky script
+                if (redhatRelease.Contains("fedora"))
+                    return "fedora";
+
+                // CentOS, RHEL, AlmaLinux can use Rocky scripts
                 if (redhatRelease.Contains("centos") ||
                     redhatRelease.Contains("red hat") ||
-                    redhatRelease.Contains("rhel"))
+                    redhatRelease.Contains("rhel") ||
+                    redhatRelease.Contains("alma"))
+                {
+                    Console.WriteLine($"RHEL-based distribution detected. Using Rocky Linux scripts (compatible).");
                     return "rocky";
+                }
+            }
+
+            // Check for Debian
+            if (File.Exists("/etc/debian_version"))
+            {
+                return "debian";
+            }
+
+            // Check for Fedora
+            if (File.Exists("/etc/fedora-release"))
+            {
+                return "fedora";
             }
         }
         catch (Exception ex)
