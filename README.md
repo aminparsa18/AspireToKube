@@ -16,7 +16,7 @@ At the beginning, this was a personal journey as a software developer into the D
 
 What if I develop on my personal Windows PC and need to continuously deploy to my Linux server? Or maybe you develop on Linux and deploy to another Linux machine? The manifests are ready, the images are built, but how do you package everything up and move it efficiently?
 
-All my experiments along this path led to this command-line tool—a simple starter pack to reduce the headache for developers without a PhD in K8sology! 
+All my experiments along this path led to this command-line tool—a simple starter pack to reduce the headache for developers! 
 
 **What it does:**
 - 📦 Packages your Aspirate manifests and Docker images into a zip file
